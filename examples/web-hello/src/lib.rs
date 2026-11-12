@@ -61,5 +61,16 @@ pub fn start() {
     if input_proof::enabled() { input_proof::run(); return; }
     #[cfg(target_arch = "wasm32")]
     if image_proof::enabled() { image_proof::run(); return; }
-    rune::run(AppSpec::new("Messages", (390.0, 760.0), State::default, view));
+    rune::run(spec());
+}
+
+fn spec() -> AppSpec<State> {
+    AppSpec::new("Messages", (390.0, 760.0), State::default, view)
+}
+
+/// The app as a `UIView *` for a UIKit or SwiftUI host that owns its own screens (`IOS.md`).
+#[cfg(target_os = "ios")]
+#[unsafe(no_mangle)]
+pub extern "C" fn web_hello_view() -> *mut std::ffi::c_void {
+    rune::ios::view(rune::App::new(spec()))
 }

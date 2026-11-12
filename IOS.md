@@ -63,26 +63,53 @@ fn main() {
 ## A Rune view in a UIKit or SwiftUI app
 
 `rune::ios::view(app)` returns a retained `UIView *` that draws `app` and fills whatever it is
-put in. Export a function that returns it from a `staticlib`, and wrap it on the Swift side:
+put in. Export a function that returns it from the app's library, and declare it in a C header:
 
 ```rust,ignore
+#[cfg(target_os = "ios")]
 #[unsafe(no_mangle)]
 pub extern "C" fn my_screen() -> *mut std::ffi::c_void {
     rune::ios::view(rune::App::new(AppSpec::new("Screen", (390.0, 760.0), State::default, view)))
 }
 ```
 
+```c
+void *my_screen(void);
+```
+
+`scripts/ios-lib` builds the library for devices and Apple silicon simulators and writes an
+XCFramework that holds both, the header and a module map:
+
+```sh
+scripts/ios-lib --package my-app --module MyApp --header include/my_app.h
+```
+
+```text
+usage: ios-lib --package PACKAGE --module MODULE --header HEADER [--out OUT] [--debug]
+```
+
+It builds with `cargo rustc --crate-type staticlib`, so the package's manifest needs no
+`staticlib` crate type. The module map links the system frameworks Rune uses, so the host app
+adds no linker flags. In Xcode, add `target/ios/MyApp.xcframework` to the app target's
+frameworks and add the `ios/RuneView` Swift package, then:
+
 ```swift
-struct MyScreen: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        Unmanaged<UIView>.fromOpaque(my_screen()).takeRetainedValue()
+import SwiftUI
+import RuneView
+import MyApp
+
+struct Screen: View {
+    var body: some View {
+        RuneView(my_screen)
     }
-    func updateUIView(_ view: UIView, context: Context) {}
 }
 ```
 
-Call it on the main thread; it returns null anywhere else. This path compiles and shares `App::run`'s view, but
-has not yet been run inside a host app.
+`RuneView` is a `UIViewRepresentable`; a UIKit app takes the pointer itself with
+`Unmanaged<UIView>.fromOpaque(my_screen()).takeRetainedValue()`. Call the function on the main
+thread: it returns null anywhere else. The view reports the safe area of where it sits, so one
+that doesn't reach the screen's edges reads zero. `examples/web-hello` exports
+`web_hello_view` this way (`examples/web-hello/include/web_hello.h`).
 
 ## What the `Info.plist` needs
 

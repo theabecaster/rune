@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Build a Rune app's library for iOS devices and simulators as one XCFramework that a UIKit or
+# SwiftUI app imports as a module. --help lists the flags; IOS.md has the whole loop.
+set -euo pipefail
+exec python3 "$(dirname "$0")/ios_lib.py" "$@"

@@ -10,15 +10,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
-use objc2_video::rc::{Retained, Weak};
-use objc2_video::runtime::{AnyClass, AnyObject, NSObject};
-use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, msg_send, sel};
+use objc2_video::rc::{Allocated, Retained, Weak};
+use objc2_video::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol, Sel};
+use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send, sel};
 
 use super::pacing::{self, Effect, Event};
 use super::surface::{Mount, Surface};
 use crate::machine::Seq;
 use crate::platform::main_queue::{after_main, on_main};
 use crate::runtime::{TouchPhase, Waker};
+use crate::GesturePhase;
 use crate::time::Instant;
 
 #[link(name = "UIKit", kind = "framework")]
@@ -38,6 +39,12 @@ unsafe extern "C" {
     static NSRunLoopCommonModes: &'static AnyObject;
 }
 
+extern_protocol!(
+    /// A gesture recognizer asks its delegate whether another may recognize alongside it.
+    #[name = "UIGestureRecognizerDelegate"]
+    unsafe trait GestureRecognizerDelegate: NSObjectProtocol {}
+);
+
 extern_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
@@ -56,6 +63,11 @@ extern_class!(
 const STYLE_DARK: isize = 2;
 /// `UIApplicationStateBackground`.
 const STATE_BACKGROUND: isize = 2;
+/// `UIGestureRecognizerState`'s `Began`, `Changed`, `Ended` and `Cancelled`.
+const GESTURE_BEGAN: isize = 1;
+const GESTURE_CHANGED: isize = 2;
+const GESTURE_ENDED: isize = 3;
+const GESTURE_CANCELLED: isize = 4;
 /// `UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight`.
 const FILL_SUPERVIEW: usize = 2 | 16;
 
@@ -133,6 +145,17 @@ define_class!(
     #[ivars = Ivars]
     pub(crate) struct RuneView;
 
+    unsafe impl NSObjectProtocol for RuneView {}
+
+    // SAFETY: every method of the protocol is optional.
+    unsafe impl GestureRecognizerDelegate for RuneView {
+        /// A pinch and a turn are one two-finger gesture: both run at once, as on a trackpad.
+        #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
+        fn recognizes_with(&self, _recognizer: &AnyObject, _other: &AnyObject) -> bool {
+            true
+        }
+    }
+
     impl RuneView {
         #[unsafe(method(layerClass))]
         fn layer_class() -> &'static AnyClass {
@@ -191,6 +214,35 @@ define_class!(
             self.touches(touches, TouchPhase::Cancelled);
         }
 
+        #[unsafe(method(runePinch:))]
+        fn pinch(&self, recognizer: &AnyObject) {
+            let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+            // SAFETY: a pinch recognizer's `scale` is a `CGFloat`. Setting it back to 1 makes
+            // the next callback's scale the change since this one.
+            let scale: CGFloat = unsafe {
+                let scale = msg_send![recognizer, scale];
+                let _: () = msg_send![recognizer, setScale: 1.0 as CGFloat];
+                scale
+            };
+            self.with_surface(|surface| surface.magnify(scale as f32 - 1.0, x, y, phase));
+            self.pace(Event::Wake);
+        }
+
+        #[unsafe(method(runeRotate:))]
+        fn rotate(&self, recognizer: &AnyObject) {
+            let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+            // SAFETY: a rotation recognizer's `rotation` is a `CGFloat` in radians. Setting it
+            // back to 0 makes the next callback's rotation the turn since this one.
+            let radians: CGFloat = unsafe {
+                let radians = msg_send![recognizer, rotation];
+                let _: () = msg_send![recognizer, setRotation: 0.0 as CGFloat];
+                radians
+            };
+            // UIKit's angle grows clockwise; a `RotateEvent`'s counterclockwise.
+            self.with_surface(|surface| surface.rotate(-(radians as f32).to_degrees(), x, y, phase));
+            self.pace(Event::Wake);
+        }
+
         #[unsafe(method(runeTick:))]
         fn tick(&self, link: &AnyObject) {
             // SAFETY: a display link's `targetTimestamp` is a `CFTimeInterval`.
@@ -231,7 +283,38 @@ impl RuneView {
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // SAFETY: a `UIView` property that takes a `UIViewAutoresizing` mask.
         let _: () = unsafe { msg_send![&*view, setAutoresizingMask: FILL_SUPERVIEW] };
+        view.recognize(class!(UIPinchGestureRecognizer), sel!(runePinch:));
+        view.recognize(class!(UIRotationGestureRecognizer), sel!(runeRotate:));
         view
+    }
+
+    /// Adds a recognizer of `class` that calls `action` on the view. When it begins, UIKit
+    /// cancels the touches the view holds, so a pinch never also pans or presses.
+    fn recognize(&self, class: &AnyClass, action: Sel) {
+        // SAFETY: `initWithTarget:action:` is a gesture recognizer's designated initializer,
+        // `action` is a method of this class that takes the recognizer, and the view conforms
+        // to `UIGestureRecognizerDelegate`. A recognizer keeps neither its target nor its
+        // delegate, and the view keeps the recognizer.
+        unsafe {
+            let recognizer: Allocated<AnyObject> = msg_send![class, alloc];
+            let recognizer: Retained<AnyObject> = msg_send![recognizer, initWithTarget: self, action: action];
+            let _: () = msg_send![&*recognizer, setDelegate: self];
+            let _: () = msg_send![self, addGestureRecognizer: &*recognizer];
+        }
+    }
+
+    /// A recognizer's phase and where its fingers' centre is in the view, or `None` in a state
+    /// that carries no gesture (possible, failed).
+    fn gesture(&self, recognizer: &AnyObject) -> Option<(GesturePhase, f32, f32)> {
+        // SAFETY: a recognizer's `state` is an `NSInteger` enum and its location a `CGPoint`.
+        let (state, at): (isize, CGPoint) = unsafe { (msg_send![recognizer, state], msg_send![recognizer, locationInView: self]) };
+        let phase = match state {
+            GESTURE_BEGAN => GesturePhase::Began,
+            GESTURE_CHANGED => GesturePhase::Moved,
+            GESTURE_ENDED | GESTURE_CANCELLED => GesturePhase::Ended,
+            _ => return None,
+        };
+        Some((phase, at.x as f32, at.y as f32))
     }
 
     fn with_surface<R>(&self, f: impl FnOnce(&mut dyn Surface) -> R) -> Option<R> {

@@ -4,10 +4,11 @@ Rune's experimental iOS target draws one `UIView` on a `CAMetalLayer` with the s
 layout, text and shaders as the desktop. A display link draws at up to 120 Hz while something
 moves and stops when nothing does, so an idle app uses no CPU or GPU.
 
-What works: drawing, light and dark appearance, one finger (tap, drag, pan with momentum),
-safe-area insets (`Cx::safe_area`: pad a full-screen root by them so content clears the status
-bar and the home indicator), and stopping in the background. What doesn't yet: the soft keyboard
-and text input, more than one finger, VoiceOver, the clipboard and `on_ready`.
+What works: drawing, light and dark appearance, one finger (tap, drag, pan with momentum), two
+fingers (a pinch to `on_magnify`, a turn to `on_rotate`), safe-area insets (`Cx::safe_area`: pad
+a full-screen root by them so content clears the status bar and the home indicator), and
+stopping in the background. What doesn't yet: the soft keyboard and text input, VoiceOver, the
+clipboard and `on_ready`.
 
 ## Build and run in a simulator
 

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::app::{App, Shared};
 use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
+use crate::{GesturePhase, MagnifyEvent, RotateEvent};
 use crate::time::Instant;
 
 pub(crate) trait Surface {
@@ -16,6 +17,10 @@ pub(crate) trait Surface {
     fn frame(&mut self, target: Instant) -> EmbedFrame;
     /// One finger's event at (x, y) in the view's points, `time` in seconds since boot.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64);
+    /// Two fingers pinched: scale by `1.0 + delta` about (x, y) in the view's points.
+    fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
+    /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
+    fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase);
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
     /// What the screen keeps at the view's top, right, bottom and left edges, in points.
@@ -35,6 +40,14 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
         self.host.runtime_mut().touch(id, phase, x, y, time);
+    }
+
+    fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase) {
+        self.host.runtime_mut().magnify_event(MagnifyEvent::new(delta).at(x, y).phase(phase));
+    }
+
+    fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase) {
+        self.host.runtime_mut().rotate_event(RotateEvent::new(degrees).at(x, y).phase(phase));
     }
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }

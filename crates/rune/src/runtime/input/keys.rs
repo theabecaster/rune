@@ -332,6 +332,11 @@ impl<S: 'static> Runtime<S> {
         self.queue.push(Action::ClipboardRead(id, content));
     }
 
+    /// The focused field's open composition and its cursor range, for a script's tree.
+    pub(crate) fn focused_preedit(&self) -> Option<(&str, Option<(usize, usize)>)> {
+        self.focused_input().filter(|i| !i.edit.is_secure()).and_then(|i| i.edit.preedit())
+    }
+
     /// Whether the focused editor requires secure native keyboard input.
     pub fn has_secure_focus(&self) -> bool {
         self.focused_input().is_some_and(|i| i.edit.is_secure())

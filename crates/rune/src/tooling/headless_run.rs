@@ -115,6 +115,8 @@ pub enum ScriptEvent {
     Paste(String),
     /// A paste with HTML or RTF beside the text (`{"paste": {"text": …, "html": …}}`).
     PasteContent(crate::ClipboardContent),
+    /// `{"type": "ime"}`: a composition's preedit or commit, as an input method sends it.
+    Ime(crate::Ime),
     /// A registered global shortcut chord. Only its handler runs; it never reaches `on_key`.
     Shortcut(crate::Shortcut),
     /// A hardware key or modifier change (`{"physical": …}`).

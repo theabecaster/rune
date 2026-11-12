@@ -213,6 +213,24 @@ pub(crate) fn parse_script(list: Value) -> Vec<Ev> {
                 out.push(Ev { t, kind: Kind::SmartMagnify, pos });
             }
             "paste" => out.push(Ev { t, kind: Kind::Paste(paste_content(&e)), pos: Pos::Rel(0.0, 0.0) }),
+            // What an input method sends, as the window hears it: `{"type": "ime", "preedit": "きょう",
+            // "cursor": [0, 3]}` (the cursor or converting clause, in characters; an empty preedit
+            // ends the composition), `{"type": "ime", "commit": "今日"}`.
+            "ime" => {
+                let ev = match (e["preedit"].as_str(), e["commit"].as_str()) {
+                    (Some(text), None) => {
+                        let byte = |k: usize| text.char_indices().nth(k).map_or(text.len(), |(i, _)| i);
+                        let cursor = e["cursor"].as_array().map(|c| {
+                            let at = |i: usize| byte(c.get(i).and_then(Value::as_u64).unwrap_or_else(|| die("ime cursor: [start, end] in characters")) as usize);
+                            (at(0), at(1))
+                        });
+                        crate::Ime::Preedit(text.to_owned(), cursor)
+                    }
+                    (None, Some(text)) => crate::Ime::Commit(text.to_owned()),
+                    _ => die("an ime event has a \"preedit\" or a \"commit\""),
+                };
+                out.push(Ev { t, kind: Kind::Ime(ev), pos: Pos::Rel(0.0, 0.0) });
+            }
             "scroll" => eased_input::swipe(&mut out, &e, t, pos),
             "resize" => eased_input::resize(&mut out, &e, t),
             "fling" => {

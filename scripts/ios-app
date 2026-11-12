@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Bundle a Rune app built for the iOS simulator, install it on a simulator and launch it.
+# --help lists the flags; IOS.md has the whole loop.
+set -euo pipefail
+exec python3 "$(dirname "$0")/ios_app.py" "$@"

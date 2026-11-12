@@ -16,8 +16,8 @@ import time
 from mac_app_bundle import Bundle
 
 
-def command(*args, check=True):
-    return subprocess.run(args, check=check, capture_output=True, text=True, timeout=10)
+def command(*args, check=True, timeout=10):
+    return subprocess.run(args, check=check, capture_output=True, text=True, timeout=timeout)
 
 
 def running(exe):

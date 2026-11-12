@@ -180,7 +180,28 @@ fn open(url: &str) -> Result<(), OpenUrlError> {
     })
 }
 
-#[cfg(target_os = "macos")]
+/// iOS opens a link in the app that owns its scheme: Safari for the web, Mail for `mailto:`.
+/// The system answers later, so a link nothing opens fails without a word here.
+#[cfg(target_os = "ios")]
+fn open(url: &str) -> Result<(), OpenUrlError> {
+    use objc2_foundation_video::{NSString, NSURL};
+    use objc2_video::rc::{Retained, autoreleasepool};
+    use objc2_video::runtime::AnyObject;
+    use objc2_video::{class, msg_send};
+    let ascii = percent_encode_non_ascii(url);
+    // SAFETY: the shared application lives for the process; `openURL:options:completionHandler:`
+    // takes an `NSURL`, a dictionary of options and a block or nil. Handlers run on the UI thread.
+    autoreleasepool(|_| unsafe {
+        let url = NSURL::URLWithString(&NSString::from_str(&ascii)).ok_or(OpenUrlError::Invalid)?;
+        let app: Option<Retained<AnyObject>> = msg_send![class!(UIApplication), sharedApplication];
+        let app = app.ok_or_else(|| OpenUrlError::Failed("no application".into()))?;
+        let options: Retained<AnyObject> = msg_send![class!(NSDictionary), dictionary];
+        let _: () = msg_send![&*app, openURL: &*url, options: &*options, completionHandler: std::ptr::null::<std::ffi::c_void>()];
+        Ok(())
+    })
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn percent_encode_non_ascii(url: &str) -> std::borrow::Cow<'_, str> {
     if url.is_ascii() { return std::borrow::Cow::Borrowed(url); }
     let mut out = String::with_capacity(url.len() + 16);
@@ -218,7 +239,7 @@ fn open(url: &str) -> Result<(), OpenUrlError> {
     Ok(())
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "macos", target_os = "windows", all(unix, not(any(target_os = "ios", target_os = "android"))))))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos", target_os = "windows", all(unix, not(target_os = "android")))))]
 fn open(_: &str) -> Result<(), OpenUrlError> { Err(OpenUrlError::Failed("this platform can't open links".into())) }
 
 #[cfg(test)]

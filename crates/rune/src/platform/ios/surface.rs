@@ -49,6 +49,8 @@ pub(crate) trait Surface {
     fn accessibility(&mut self) -> Option<TreeUpdate>;
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
+    /// The Reduce Motion setting.
+    fn set_reduced_motion(&mut self, reduced: bool);
     /// What the screen keeps at the view's top, right, bottom and left edges, in points.
     fn set_safe_area(&mut self, insets: [f32; 4]);
 }
@@ -106,6 +108,8 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }
 
+    fn set_reduced_motion(&mut self, reduced: bool) { self.host.runtime_mut().set_system_reduced_motion(reduced); }
+
     fn set_safe_area(&mut self, insets: [f32; 4]) { self.host.runtime_mut().set_safe_area(insets); }
 }
 
@@ -119,7 +123,9 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
         // view calls this on the main thread.
         let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake.clone())? };
-        let host = host.with_system_clipboard(wake.clone());
+        let mut host = host.with_system_clipboard(wake.clone());
+        // The view is the app's whole host here: links open in the system, as from a window.
+        host.runtime_mut().open_urls_natively = true;
         Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title }))
     })
 }

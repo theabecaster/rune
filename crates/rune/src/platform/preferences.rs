@@ -69,7 +69,17 @@ unsafe fn gnome_animations() -> Option<bool> {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(target_os = "ios")]
+pub(crate) fn reduced_motion() -> bool {
+    #[link(name = "UIKit", kind = "framework")]
+    unsafe extern "C" {
+        fn UIAccessibilityIsReduceMotionEnabled() -> bool;
+    }
+    // SAFETY: a C function that reads the Reduce Motion setting.
+    unsafe { UIAccessibilityIsReduceMotionEnabled() }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "ios")))]
 pub(crate) fn reduced_motion() -> bool { false }
 
 /// The desktop's light or dark preference where winit reports none (Linux: the XDG desktop

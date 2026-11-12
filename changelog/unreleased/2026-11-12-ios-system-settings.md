@@ -1,0 +1,1 @@
+- **iOS: Reduce Motion and links.** A `RuneView` follows the system's Reduce Motion setting, at launch and when it changes, and `Tx::open_url` opens a link in the app that owns its scheme (Safari, Mail).

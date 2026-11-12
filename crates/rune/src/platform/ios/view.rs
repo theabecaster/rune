@@ -22,6 +22,7 @@ use crate::a11y::ios::Gesture;
 use super::text_input::RuneTextInput;
 use crate::machine::Seq;
 use crate::platform::main_queue::{after_main, on_main};
+use crate::platform::preferences::reduced_motion;
 use crate::runtime::{TouchPhase, Waker};
 use crate::time::Instant;
 
@@ -33,6 +34,7 @@ unsafe extern "C" {
     static UIApplicationWillEnterForegroundNotification: &'static AnyObject;
     static UIKeyboardWillChangeFrameNotification: &'static AnyObject;
     static UIKeyboardFrameEndUserInfoKey: &'static AnyObject;
+    static UIAccessibilityReduceMotionStatusDidChangeNotification: &'static AnyObject;
 }
 
 #[link(name = "QuartzCore", kind = "framework")]
@@ -284,6 +286,12 @@ define_class!(
             self.pace(Event::Wake);
         }
 
+        #[unsafe(method(runeReduceMotion:))]
+        fn reduce_motion(&self, _notification: &AnyObject) {
+            self.with_surface(|surface| surface.set_reduced_motion(reduced_motion()));
+            self.pace(Event::Wake);
+        }
+
         #[unsafe(method(runeForeground:))]
         fn foreground(&self, _notification: &AnyObject) {
             self.pace(Event::Foreground);
@@ -414,6 +422,7 @@ impl RuneView {
                 match mount(Retained::as_ptr(&layer) as *mut c_void, size, scale, self.dark(), self.waker()) {
                     Ok(mut surface) => {
                         surface.set_safe_area(self.safe_area());
+                        surface.set_reduced_motion(reduced_motion());
                         // A client that asked before the app started still gets its tree.
                         if self.ivars().accessibility.borrow().asked() { surface.accessibility_wanted(); }
                         Stage::Live(surface)
@@ -470,6 +479,7 @@ impl RuneView {
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeBackground:), name: UIApplicationDidEnterBackgroundNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeForeground:), name: UIApplicationWillEnterForegroundNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeKeyboard:), name: UIKeyboardWillChangeFrameNotification, object: None::<&AnyObject>];
+            let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeReduceMotion:), name: UIAccessibilityReduceMotionStatusDidChangeNotification, object: None::<&AnyObject>];
             let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];
             let state: isize = msg_send![&*app, applicationState];
             self.pace(Event::Attached { foreground: state != STATE_BACKGROUND });

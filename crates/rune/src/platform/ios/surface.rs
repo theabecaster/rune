@@ -7,8 +7,20 @@ use std::sync::Arc;
 use crate::app::{App, Shared};
 use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
-use crate::{GesturePhase, MagnifyEvent, RotateEvent};
+use crate::{GesturePhase, Ime, Key, KeyEvent, MagnifyEvent, Mods, RotateEvent};
+use super::text_doc::Snapshot;
 use crate::time::Instant;
+
+/// What the focused field tells the keyboard after a frame.
+pub(crate) struct TextState {
+    /// A text field, or a caret an app draws itself, has the focus.
+    pub(crate) wanted: bool,
+    pub(crate) snapshot: Snapshot,
+    /// The caret's rect in the view's points.
+    pub(crate) caret: Option<[f32; 4]>,
+    /// The field is a password.
+    pub(crate) secure: bool,
+}
 
 pub(crate) trait Surface {
     /// The view's size in points and its display scale.
@@ -21,6 +33,12 @@ pub(crate) trait Surface {
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
     /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase);
+    /// A key the keyboard typed.
+    fn key(&mut self, key: Key);
+    /// A composition, a commit or a selection from the keyboard.
+    fn ime(&mut self, ime: Ime);
+    /// What the focused field tells the keyboard, as of the last frame.
+    fn text(&self) -> TextState;
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
     /// What the screen keeps at the view's top, right, bottom and left edges, in points.
@@ -48,6 +66,22 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase) {
         self.host.runtime_mut().rotate_event(RotateEvent::new(degrees).at(x, y).phase(phase));
+    }
+
+    fn key(&mut self, key: Key) { self.host.runtime_mut().key(KeyEvent { key, mods: Mods::default() }); }
+
+    fn ime(&mut self, ime: Ime) { self.host.runtime_mut().ime(ime); }
+
+    fn text(&self) -> TextState {
+        let rt = self.host.runtime();
+        let secure = rt.has_secure_focus();
+        let snapshot = match rt.ime_text() {
+            _ if secure => Snapshot::Hidden,
+            _ if rt.focused_preedit().is_some() => Snapshot::Composing,
+            Some(text) => Snapshot::Field { text: text.text, start: text.start, selection: text.selection },
+            None => Snapshot::Hidden,
+        };
+        TextState { wanted: rt.wants_text(), snapshot, caret: rt.ime_area.map(|area| rt.to_window(area)), secure }
     }
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }

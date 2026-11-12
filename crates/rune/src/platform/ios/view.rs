@@ -16,7 +16,10 @@ use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOn
 
 use super::pacing::{self, Effect, Event};
 use super::surface::{Mount, Surface};
-use crate::machine::Seq;
+use super::text_doc::Effect as Edit;
+use super::text_input::RuneTextInput;
+use crate::machine::{Effects, Seq};
+use crate::Ime;
 use crate::platform::main_queue::{after_main, on_main};
 use crate::runtime::{TouchPhase, Waker};
 use crate::GesturePhase;
@@ -26,6 +29,8 @@ use crate::time::Instant;
 unsafe extern "C" {
     static UIApplicationDidEnterBackgroundNotification: &'static AnyObject;
     static UIApplicationWillEnterForegroundNotification: &'static AnyObject;
+    static UIKeyboardWillChangeFrameNotification: &'static AnyObject;
+    static UIKeyboardFrameEndUserInfoKey: &'static AnyObject;
 }
 
 #[link(name = "QuartzCore", kind = "framework")]
@@ -119,6 +124,10 @@ pub(crate) struct Ivars {
     link: RefCell<Option<Retained<AnyObject>>>,
     /// A wake from another thread is on its way to the main queue: later ones ride with it.
     wake_queued: Arc<AtomicBool>,
+    /// What the keyboard talks to, a hidden view inside this one.
+    text: RefCell<Option<Retained<RuneTextInput>>>,
+    /// How far the soft keyboard reaches up over the view's bottom edge, in points.
+    keyboard: Cell<f32>,
 }
 
 /// A weak view that crosses threads but is only read on the main one.
@@ -248,6 +257,27 @@ define_class!(
             self.pace(Event::Tick);
         }
 
+        #[unsafe(method(runeKeyboard:))]
+        fn keyboard(&self, notification: &AnyObject) {
+            // SAFETY: the notification's `userInfo` holds the keyboard's final frame as an
+            // `NSValue` of a `CGRect` in the screen's coordinates, which a nil source view
+            // converts from; `bounds` is a `CGRect`.
+            let overlap = unsafe {
+                let info: Option<Retained<AnyObject>> = msg_send![notification, userInfo];
+                let Some(info) = info else { return };
+                let value: Option<Retained<AnyObject>> = msg_send![&*info, objectForKey: UIKeyboardFrameEndUserInfoKey];
+                let Some(value) = value else { return };
+                let frame: CGRect = msg_send![&*value, CGRectValue];
+                let frame: CGRect = msg_send![self, convertRect: frame, fromView: None::<&AnyObject>];
+                let bounds: CGRect = msg_send![self, bounds];
+                (bounds.origin.y + bounds.size.height - frame.origin.y).clamp(0.0, bounds.size.height)
+            };
+            self.ivars().keyboard.set(overlap as f32);
+            let insets = self.safe_area();
+            self.with_surface(|surface| surface.set_safe_area(insets));
+            self.pace(Event::Wake);
+        }
+
         #[unsafe(method(runeForeground:))]
         fn foreground(&self, _notification: &AnyObject) {
             self.pace(Event::Foreground);
@@ -270,12 +300,18 @@ impl RuneView {
             seq: Cell::new(Seq::default()),
             link: RefCell::new(None),
             wake_queued: Arc::new(AtomicBool::new(false)),
+            text: RefCell::new(None),
+            keyboard: Cell::new(0.0),
         });
         let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0));
         // SAFETY: `initWithFrame:` is `UIView`'s designated initializer.
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // SAFETY: a `UIView` property that takes a `UIViewAutoresizing` mask.
         let _: () = unsafe { msg_send![&*view, setAutoresizingMask: FILL_SUPERVIEW] };
+        let text = RuneTextInput::new(mtm, &view);
+        // SAFETY: `addSubview:` takes a view, which the text input is.
+        let _: () = unsafe { msg_send![&*view, addSubview: &*text] };
+        *view.ivars().text.borrow_mut() = Some(text);
         view.recognize(class!(UIPinchGestureRecognizer), sel!(runePinch:));
         view.recognize(class!(UIRotationGestureRecognizer), sel!(runeRotate:));
         view
@@ -334,11 +370,15 @@ impl RuneView {
     }
 
     /// What the screen keeps at the view's top, right, bottom and left edges: the status bar,
-    /// the home indicator and the display's corners where the view reaches them.
+    /// the home indicator, the display's corners where the view reaches them, and the soft
+    /// keyboard while it shows.
     fn safe_area(&self) -> [f32; 4] {
         // SAFETY: a `UIView` property of type `UIEdgeInsets`.
         let insets: EdgeInsets = unsafe { msg_send![self, safeAreaInsets] };
-        [insets.top, insets.right, insets.bottom, insets.left].map(|inset| inset as f32)
+        // The soft keyboard takes the bottom of the screen as the home indicator does: content
+        // padded by the safe area stays above it.
+        let bottom = (insets.bottom as f32).max(self.ivars().keyboard.get());
+        [insets.top as f32, insets.right as f32, bottom, insets.left as f32]
     }
 
     fn laid_out(&self) {
@@ -406,6 +446,7 @@ impl RuneView {
             let _: () = msg_send![self, setNeedsLayout];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeBackground:), name: UIApplicationDidEnterBackgroundNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeForeground:), name: UIApplicationWillEnterForegroundNotification, object: None::<&AnyObject>];
+            let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeKeyboard:), name: UIKeyboardWillChangeFrameNotification, object: None::<&AnyObject>];
             let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];
             let state: isize = msg_send![&*app, applicationState];
             self.pace(Event::Attached { foreground: state != STATE_BACKGROUND });
@@ -432,9 +473,32 @@ impl RuneView {
         // SAFETY: a C function that reads a clock.
         let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
         let target = Instant::now() + Duration::from_secs_f64(ahead);
-        let frame = self.with_surface(|surface| surface.frame(target));
-        let (animating, wake_after) = frame.map_or((false, None), |f| (f.animating, f.wake_after_secs));
-        self.pace(Event::Frame { animating, wake_after });
+        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text()));
+        let Some((frame, text)) = drawn else {
+            self.pace(Event::Frame { animating: false, wake_after: None });
+            return;
+        };
+        // The frame applied the input before it: the keyboard hears what the field holds now.
+        let input = self.ivars().text.borrow().clone();
+        if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
+        self.pace(Event::Frame { animating: frame.animating, wake_after: frame.wake_after_secs });
+    }
+
+    /// Carries the keyboard's edits to the runtime, which applies them on its next frame.
+    pub(crate) fn text_edits(&self, edits: Effects<Edit>) {
+        self.with_surface(|surface| {
+            for edit in edits {
+                match edit {
+                    Edit::Key(key) => surface.key(key),
+                    Edit::Commit(text) => surface.ime(Ime::Commit(text)),
+                    Edit::Preedit(text, cursor) => surface.ime(Ime::Preedit(text, cursor, Vec::new())),
+                    Edit::Select(range) => surface.ime(Ime::Select(range)),
+                    // For the keyboard, not the runtime.
+                    Edit::TextChanged | Edit::SelectionChanged => {}
+                }
+            }
+        });
+        self.pace(Event::Wake);
     }
 
     fn touches(&self, touches: &AnyObject, phase: TouchPhase) {

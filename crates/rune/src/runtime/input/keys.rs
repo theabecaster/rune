@@ -335,6 +335,13 @@ impl<S: 'static> Runtime<S> {
         self.queue.push(Action::ClipboardRead(id, content));
     }
 
+    /// Whether a text field, or a caret an app draws itself, has the focus: a host with a soft
+    /// keyboard shows it.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn wants_text(&self) -> bool {
+        self.focused_input().is_some() || self.ime_area.is_some()
+    }
+
     /// The focused field's text around its selection, for the platform's input method.
     pub(crate) fn ime_text(&self) -> Option<crate::edit::ImeText> {
         self.focused_input().and_then(|i| i.edit.ime_text())

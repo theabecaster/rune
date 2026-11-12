@@ -7,6 +7,9 @@ mod app;
 pub(crate) mod pacing;
 #[cfg(target_os = "ios")]
 mod surface;
+pub(crate) mod text_doc;
+#[cfg(target_os = "ios")]
+mod text_input;
 #[cfg(target_os = "ios")]
 mod view;
 

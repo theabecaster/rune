@@ -6,9 +6,12 @@ moves and stops when nothing does, so an idle app uses no CPU or GPU.
 
 What works: drawing, light and dark appearance, one finger (tap, drag, pan with momentum), two
 fingers (a pinch to `on_magnify`, a turn to `on_rotate`), safe-area insets (`Cx::safe_area`: pad
-a full-screen root by them so content clears the status bar and the home indicator), and
-stopping in the background. What doesn't yet: the soft keyboard and text input, VoiceOver, the
-clipboard and `on_ready`.
+a full-screen root by them so content clears the status bar and the home indicator), text input
+(the soft keyboard shows while a text field has the focus and counts as the safe area's bottom
+inset, so a padded root lifts above it; typing, delete, return, predictions, autocorrection and
+marked text edit the field, and a secure field shows the keyboard none of its text), and
+stopping in the background. What doesn't yet: moving the caret or selecting from the keyboard's
+own gestures (its rects are the caret's), VoiceOver, the clipboard and `on_ready`.
 
 ## Build and run in a simulator
 

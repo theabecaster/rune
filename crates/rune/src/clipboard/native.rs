@@ -48,7 +48,12 @@ fn worker() -> &'static mpsc::Sender<Request> {
     &WORKER.get_or_init(|| Worker::spawn(|| arboard::Clipboard::new().ok())).sender
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(target_os = "ios")]
+fn worker() -> &'static mpsc::Sender<Request> {
+    &WORKER.get_or_init(|| Worker::spawn(|| Some(ios::Pasteboard))).sender
+}
+
+#[cfg(target_os = "android")]
 fn worker() -> &'static mpsc::Sender<Request> {
     &WORKER.get_or_init(|| Worker::spawn(|| None::<Board>)).sender
 }

@@ -65,6 +65,8 @@ pub struct LayerHost<S: 'static> {
     /// The wait after a frame that got no drawable.
     backoff: Backoff,
     meter: SurfaceMeter,
+    /// The system clipboard, for a host that asked for it.
+    clipboard: Option<crate::clipboard::Client>,
 }
 
 impl<S: 'static> LayerHost<S> {
@@ -127,6 +129,7 @@ impl<S: 'static> LayerHost<S> {
             configured: true,
             backoff: Backoff::default(),
             meter,
+            clipboard: None,
         })
     }
 
@@ -144,6 +147,27 @@ impl<S: 'static> LayerHost<S> {
 
     pub fn runtime_mut(&mut self) -> &mut Runtime<S> {
         &mut self.rt
+    }
+
+    /// Copies and pastes go to the system clipboard, as an app's own window sends them: a copy
+    /// after the frame whose handler made it, a paste when the clipboard's worker answers,
+    /// which calls `wake` for the frame that delivers it. Without this a host reads
+    /// [`Runtime::copy_request`] itself and pastes arrive only from a clipboard a test supplies.
+    pub fn with_system_clipboard(mut self, wake: Waker) -> Self {
+        let mut clipboard = crate::clipboard::Client::default();
+        clipboard.connect(wake);
+        self.clipboard = Some(clipboard);
+        self
+    }
+
+    /// A key from the host's keyboard. With [`LayerHost::with_system_clipboard`], the paste
+    /// shortcut over something that takes a paste reads the system clipboard, as in an app's
+    /// own window; every other key is [`Runtime::key`].
+    pub fn key(&mut self, key: crate::KeyEvent) {
+        match &self.clipboard {
+            Some(clipboard) if key.edit_command() == Some('v') && self.rt.accepts_paste() => clipboard.read(&self.rt),
+            _ => self.rt.key(key),
+        }
     }
 
     /// What this surface asked for, drew and missed, as totals and per-second rates
@@ -219,9 +243,13 @@ impl<S: 'static> LayerHost<S> {
         }
         let _ = self.backoff.step(BackoffEvent::Lapsed);
         let compositing = self.compositor.as_ref().is_some_and(|c| c.animating());
+        if let Some(clipboard) = &self.clipboard { clipboard.receive(&mut self.rt); }
         let (animating, dt) = self.clock.advance(&mut self.rt, target, compositing);
         let update_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        crate::clipboard::flush_memory(&mut self.rt);
+        match &self.clipboard {
+            Some(clipboard) => clipboard.flush(&mut self.rt),
+            None => crate::clipboard::flush_memory(&mut self.rt),
+        }
         if self.rt.popup_menu().is_some() {
             self.rt.cancel_popups();
         }

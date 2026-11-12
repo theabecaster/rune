@@ -23,6 +23,13 @@ impl<S: 'static> Runtime<S> {
         text
     }
 
+    /// Whether a secondary press at (x, y) has anything to open: a host whose secondary press
+    /// is a long press starts one only then.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn takes_secondary(&self, x: f32, y: f32) -> bool {
+        self.secondary_target(x, y).is_some()
+    }
+
     /// Capture a secondary gesture without activating primary actions or text selection.
     pub fn secondary_down(&mut self, x: f32, y: f32) {
         self.pointer = Some((x, y));

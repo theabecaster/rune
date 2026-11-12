@@ -67,6 +67,8 @@ pub struct LayerHost<S: 'static> {
     meter: SurfaceMeter,
     /// The system clipboard, for a host that asked for it.
     clipboard: Option<crate::clipboard::Client>,
+    /// The host shows pop-up menus itself.
+    popup_menus: bool,
 }
 
 impl<S: 'static> LayerHost<S> {
@@ -130,6 +132,7 @@ impl<S: 'static> LayerHost<S> {
             backoff: Backoff::default(),
             meter,
             clipboard: None,
+            popup_menus: false,
         })
     }
 
@@ -157,6 +160,14 @@ impl<S: 'static> LayerHost<S> {
         let mut clipboard = crate::clipboard::Client::default();
         clipboard.connect(wake);
         self.clipboard = Some(clipboard);
+        self
+    }
+
+    /// The host shows pop-up menus itself: it reads [`Runtime::popup_menu`] after a frame, puts
+    /// the menu up and answers with [`Runtime::resolve_popup`]. Without this every menu a
+    /// handler asks for is answered `None` at once.
+    pub fn with_popup_menus(mut self) -> Self {
+        self.popup_menus = true;
         self
     }
 
@@ -250,7 +261,7 @@ impl<S: 'static> LayerHost<S> {
             Some(clipboard) => clipboard.flush(&mut self.rt),
             None => crate::clipboard::flush_memory(&mut self.rt),
         }
-        if self.rt.popup_menu().is_some() {
+        if !self.popup_menus && self.rt.popup_menu().is_some() {
             self.rt.cancel_popups();
         }
         self.rt.refuse_file_dialog("native file dialogs are unsupported in embedded views");

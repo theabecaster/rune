@@ -8,6 +8,7 @@
 //! - Windows: a `TrackPopupMenuEx` menu owned by the window, light or dark as the window's
 //!   content is. It drops down below an element anchor, as Windows menus do, and Rune keeps
 //!   drawing while it tracks: frames, wakes, timers and overlays.
+//! - iOS: the system's edit menu (the bar above a selection), shown by the app's `RuneView`.
 //! - Other platforms: [`popup_menu_supported`] is false and the callback gets `None` at once.
 //! - Headless runs: the menu stays open in `--tree` (`popupMenu`) until a script's
 //!   `{"type": "menu-pick", "id": "dark"}` or `{"type": "menu-cancel"}` answers it.
@@ -33,11 +34,12 @@ use win32 as host;
 #[cfg(target_os = "windows")]
 pub(crate) use win32::{layout, turns};
 
-/// Platforms without native menus: nothing opens, so every request answers `None` at once.
+/// Platforms whose windows open no native menu: every request a window gets answers `None` at
+/// once. iOS has no such window: a `RuneView` shows the menu itself, as the system's edit menu.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod host {
     use super::{Arc, Rc, Session, Show, Waker, Window};
-    pub(super) const SUPPORTED: bool = false;
+    pub(super) const SUPPORTED: bool = cfg!(target_os = "ios");
     pub(super) type Tracking = ();
     pub(super) fn show(_: &Arc<Window>, _: Show, _: Rc<Session>, _: Option<Waker>) -> bool { false }
     pub(super) fn stop(_: Tracking) {}
@@ -45,7 +47,7 @@ mod host {
     pub(super) fn start(_: Waker) {}
 }
 
-/// Whether this platform shows native pop-up menus (macOS and Windows). Where it doesn't,
+/// Whether this platform shows native pop-up menus (macOS, Windows and iOS). Where it doesn't,
 /// [`Tx::popup_menu`] calls back with `None` straight away, so an app can draw its own menu
 /// instead.
 pub fn popup_menu_supported() -> bool { host::SUPPORTED }

@@ -10,6 +10,8 @@ use crate::runtime::{TouchPhase, Waker};
 use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text_doc::Snapshot;
 use crate::a11y::AccessibilityLink;
+use crate::popup_menu::Show;
+use crate::edit::ImeText;
 use accesskit::{ActionRequest, TreeUpdate};
 use crate::time::Instant;
 
@@ -35,6 +37,14 @@ pub(crate) trait Surface {
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
     /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase);
+    /// Whether a secondary press at (x, y) would open a menu or reach a handler.
+    fn takes_secondary(&self, x: f32, y: f32) -> bool;
+    /// A secondary press at (x, y): a long press.
+    fn secondary(&mut self, x: f32, y: f32);
+    /// The next pop-up menu to show, once the frame that asked for it is done.
+    fn popup(&mut self) -> Option<Show>;
+    /// The menu showing was answered with an item's id, or dismissed.
+    fn popup_pick(&mut self, picked: Option<String>);
     /// A key from the soft keyboard or a hardware one.
     fn key(&mut self, key: KeyEvent);
     /// A composition, a commit or a selection from the keyboard.
@@ -62,6 +72,9 @@ struct Hosted<S: 'static> {
     accessibility: AccessibilityLink,
     /// The app's name, which names the accessibility tree's root.
     title: &'static str,
+    /// The focused field's text and selection when the finger that is down landed, if it had
+    /// one selected.
+    selected: Option<ImeText>,
 }
 
 impl<S: 'static> Surface for Hosted<S> {
@@ -79,7 +92,11 @@ impl<S: 'static> Surface for Hosted<S> {
     fn accessibility(&mut self) -> Option<TreeUpdate> { self.accessibility.update(self.host.runtime_mut()) }
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
-        self.host.runtime_mut().touch(id, phase, x, y, time);
+        let rt = self.host.runtime_mut();
+        if phase == TouchPhase::Started && !rt.touching() {
+            self.selected = rt.ime_text().filter(|text| !text.selection.is_empty());
+        }
+        rt.touch(id, phase, x, y, time);
     }
 
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase) {
@@ -88,6 +105,37 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase) {
         self.host.runtime_mut().rotate_event(RotateEvent::new(degrees).at(x, y).phase(phase));
+    }
+
+    fn takes_secondary(&self, x: f32, y: f32) -> bool { self.host.runtime().takes_secondary(x, y) }
+
+    fn secondary(&mut self, x: f32, y: f32) {
+        let rt = self.host.runtime_mut();
+        // A finger that lands in a field places the caret at once, as a mouse press does, so a
+        // long press on selected text would find nothing selected. The selection the finger
+        // landed on is put back first; the field's menu then keeps it for a press inside it
+        // and moves the caret for one outside, as for a right-click.
+        if let Some(before) = self.selected.take()
+            && rt.ime_text().is_some_and(|now| now.text == before.text && now.start == before.start && now.selection.is_empty())
+        {
+            rt.ime(Ime::Select(before.start + before.selection.start..before.start + before.selection.end));
+        }
+        rt.secondary_down(x, y);
+        rt.secondary_up(x, y);
+    }
+
+    fn popup(&mut self) -> Option<Show> {
+        let rt = self.host.runtime_mut();
+        if rt.popup_waits_for_layout() { return None; }
+        match rt.take_popup()? {
+            Some(show) => Some(show),
+            // It can't open: its anchor is gone.
+            None => { let _ = rt.resolve_popup(None); None }
+        }
+    }
+
+    fn popup_pick(&mut self, picked: Option<String>) {
+        let _ = self.host.runtime_mut().resolve_popup(picked.as_deref());
     }
 
     fn key(&mut self, key: KeyEvent) { self.host.key(key); }
@@ -123,9 +171,9 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
         // view calls this on the main thread.
         let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake.clone())? };
-        let mut host = host.with_system_clipboard(wake.clone());
+        let mut host = host.with_system_clipboard(wake.clone()).with_popup_menus();
         // The view is the app's whole host here: links open in the system, as from a window.
         host.runtime_mut().open_urls_natively = true;
-        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title }))
+        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title, selected: None }))
     })
 }

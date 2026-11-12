@@ -27,6 +27,7 @@ use crate::runtime::{TouchPhase, Waker};
 use crate::time::Instant;
 
 mod input;
+mod menu;
 
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
@@ -52,6 +53,12 @@ extern_protocol!(
     /// A gesture recognizer asks its delegate whether another may recognize alongside it.
     #[name = "UIGestureRecognizerDelegate"]
     unsafe trait GestureRecognizerDelegate: NSObjectProtocol {}
+);
+
+extern_protocol!(
+    /// An edit menu interaction asks its delegate for the menu, its place, and says when it goes.
+    #[name = "UIEditMenuInteractionDelegate"]
+    unsafe trait EditMenuInteractionDelegate: NSObjectProtocol {}
 );
 
 extern_class!(
@@ -128,6 +135,10 @@ pub(crate) struct Ivars {
     /// How far the soft keyboard reaches up over the view's bottom edge, in points.
     keyboard: Cell<f32>,
     accessibility: RefCell<Accessibility>,
+    menu: RefCell<menu::Menu>,
+    menu_seq: Cell<Seq>,
+    /// What presents the menu, made when the first one opens.
+    edit_menu: RefCell<Option<Retained<AnyObject>>>,
     /// The hardware key that repeats while held.
     keys: RefCell<keys::Repeat>,
     key_seq: Cell<Seq>,
@@ -146,6 +157,11 @@ impl MainOnly {
     /// Feeds `event` to the view's pacing, if the view is still alive. Main thread only.
     pub(super) fn pace(&self, event: Event) {
         if let Some(view) = self.0.load() { view.pace(event); }
+    }
+
+    /// Tells the view a dismissed menu's grace ran out.
+    fn menu_left(&self, attempt: crate::machine::Attempt) {
+        if let Some(view) = self.0.load() { view.menu_left(attempt); }
     }
 
     /// Feeds `event` to the view's key repeat, as `pace` does its pacing.
@@ -170,6 +186,32 @@ define_class!(
         #[unsafe(method(gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:))]
         fn recognizes_with(&self, _recognizer: &AnyObject, _other: &AnyObject) -> bool {
             true
+        }
+
+        /// A long press begins only over something with a menu to open.
+        #[unsafe(method(gestureRecognizerShouldBegin:))]
+        fn recognizer_begins(&self, recognizer: &AnyObject) -> bool {
+            // SAFETY: `isKindOfClass:` takes a class and answers a `BOOL`.
+            let long_press: bool = unsafe { msg_send![recognizer, isKindOfClass: class!(UILongPressGestureRecognizer)] };
+            !long_press || self.long_press_begins(recognizer)
+        }
+    }
+
+    // SAFETY: every method of the protocol is optional.
+    unsafe impl EditMenuInteractionDelegate for RuneView {
+        #[unsafe(method_id(editMenuInteraction:menuForConfiguration:suggestedActions:))]
+        fn edit_menu(&self, _interaction: &AnyObject, _configuration: &AnyObject, _suggested: &AnyObject) -> Option<Retained<AnyObject>> {
+            self.menu_items()
+        }
+
+        #[unsafe(method(editMenuInteraction:targetRectForConfiguration:))]
+        fn edit_menu_target(&self, _interaction: &AnyObject, _configuration: &AnyObject) -> CGRect {
+            self.menu_target()
+        }
+
+        #[unsafe(method(editMenuInteraction:willDismissMenuForConfiguration:animator:))]
+        fn edit_menu_dismissed(&self, _interaction: &AnyObject, _configuration: &AnyObject, _animator: &AnyObject) {
+            self.menu_dismissed();
         }
     }
 
@@ -229,6 +271,16 @@ define_class!(
         #[unsafe(method(touchesCancelled:withEvent:))]
         fn touches_cancelled(&self, touches: &AnyObject, _event: Option<&AnyObject>) {
             self.touches(touches, TouchPhase::Cancelled);
+        }
+
+        #[unsafe(method(runeLongPress:))]
+        fn long_press(&self, recognizer: &AnyObject) {
+            self.long_pressed(recognizer);
+        }
+
+        #[unsafe(method(runeMenuPick:))]
+        fn menu_pick(&self, command: &AnyObject) {
+            self.menu_picked(command);
         }
 
         #[unsafe(method(runePinch:))]
@@ -358,6 +410,9 @@ impl RuneView {
             text: RefCell::new(None),
             keyboard: Cell::new(0.0),
             accessibility: RefCell::new(Accessibility::new()),
+            menu: RefCell::default(),
+            menu_seq: Cell::new(Seq::default()),
+            edit_menu: RefCell::new(None),
             keys: RefCell::new(keys::Repeat::Idle),
             key_seq: Cell::new(Seq::default()),
         });
@@ -372,6 +427,7 @@ impl RuneView {
         *view.ivars().text.borrow_mut() = Some(text);
         view.recognize(class!(UIPinchGestureRecognizer), sel!(runePinch:));
         view.recognize(class!(UIRotationGestureRecognizer), sel!(runeRotate:));
+        view.recognize(class!(UILongPressGestureRecognizer), sel!(runeLongPress:));
         view
     }
 
@@ -498,14 +554,15 @@ impl RuneView {
         // SAFETY: a C function that reads a clock.
         let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
         let target = Instant::now() + Duration::from_secs_f64(ahead);
-        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text(), surface.accessibility()));
-        let Some((frame, text, tree)) = drawn else {
+        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text(), surface.accessibility(), surface.popup()));
+        let Some((frame, text, tree, popup)) = drawn else {
             self.pace(Event::Frame { animating: false, wake_after: None });
             return;
         };
         // The frame applied the input before it: the keyboard hears what the field holds now.
         let input = self.ivars().text.borrow().clone();
         if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
+        if let Some(popup) = popup { self.open_menu(popup); }
         if let Some(tree) = tree {
             let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree);
             posts.post();

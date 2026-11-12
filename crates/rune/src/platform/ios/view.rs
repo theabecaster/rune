@@ -19,7 +19,7 @@ use super::surface::{Mount, Surface};
 use super::accessibility::Accessibility;
 use super::keys;
 use crate::a11y::ios::Gesture;
-use super::text_input::RuneTextInput;
+use super::text::input::RuneTextInput;
 use crate::machine::Seq;
 use crate::platform::main_queue::{after_main, on_main};
 use crate::platform::preferences::reduced_motion;

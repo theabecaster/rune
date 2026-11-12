@@ -10,8 +10,8 @@ use objc2_video::{DefinedClass, class, msg_send, sel};
 
 use super::super::keys;
 use super::super::pacing::Event;
-use super::super::text_doc::Effect as Edit;
-use super::super::text_geometry::Geometry;
+use super::super::text::doc::Effect as Edit;
+use super::super::text::geometry::Geometry;
 use super::{MainOnly, RuneView, Stage};
 use crate::machine::Effects;
 use crate::platform::main_queue::after_main;

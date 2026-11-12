@@ -289,5 +289,5 @@ fn previous_grapheme(text: &str, at: usize) -> usize {
 }
 
 #[cfg(test)]
-#[path = "text_doc_tests.rs"]
+#[path = "doc_tests.rs"]
 mod tests;

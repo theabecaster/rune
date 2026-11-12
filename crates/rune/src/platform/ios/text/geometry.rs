@@ -87,5 +87,5 @@ impl Geometry {
 }
 
 #[cfg(test)]
-#[path = "text_geometry_tests.rs"]
+#[path = "geometry_tests.rs"]
 mod tests;

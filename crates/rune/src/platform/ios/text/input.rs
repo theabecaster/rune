@@ -1,6 +1,6 @@
 //! `RuneTextInput`: what the iOS keyboard talks to. A hidden view inside a `RuneView` that
 //! becomes first responder while a text field has the focus, and answers UIKit's text input
-//! protocol from the keyboard's copy of the field (`text_doc`): the soft keyboard, a hardware
+//! protocol from the keyboard's copy of the field (`doc`): the soft keyboard, a hardware
 //! one, autocorrection, dictation and marked text all edit through it.
 //!
 //! Positions and ranges are UTF-16 offsets into that copy. Rune draws its own caret and
@@ -15,9 +15,9 @@ use objc2_video::rc::{Allocated, Retained, Weak};
 use objc2_video::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2_video::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send};
 
-use super::text_doc::{Document, Effect, Event, Snapshot};
-use super::text_geometry::Geometry;
-use super::view::{RuneView, UIResponder, UIView};
+use super::doc::{Document, Effect, Event, Snapshot};
+use super::geometry::Geometry;
+use super::super::view::{RuneView, UIResponder, UIView};
 
 extern_class!(
     #[unsafe(super(NSObject))]

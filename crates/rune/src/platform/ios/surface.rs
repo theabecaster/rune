@@ -34,6 +34,11 @@ pub(crate) trait Surface {
     fn frame(&mut self, target: Instant) -> EmbedFrame;
     /// One finger's event at (x, y) in the view's points, `time` in seconds since boot.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64);
+    /// The pointer of a mouse or trackpad is at this point of the view, or left it.
+    fn hover(&mut self, at: Option<(f32, f32)>);
+    /// A wheel or a trackpad scrolled the content under `at` by `moved` points; `velocity` is
+    /// its speed in points a second when the scroll ends.
+    fn scroll(&mut self, phase: GesturePhase, at: (f32, f32), moved: (f32, f32), velocity: (f32, f32));
     /// Two fingers pinched: scale by `1.0 + delta` about (x, y) in the view's points.
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
     /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
@@ -100,6 +105,30 @@ impl<S: 'static> Surface for Hosted<S> {
             self.selected = rt.ime_text().filter(|text| !text.selection.is_empty());
         }
         rt.touch(id, phase, x, y, time);
+    }
+
+    fn hover(&mut self, at: Option<(f32, f32)>) {
+        let rt = self.host.runtime_mut();
+        // A finger's touch is the pointer while it is down.
+        if rt.touching() { return; }
+        match at {
+            Some((x, y)) => rt.pointer_move(x, y),
+            None => rt.pointer_leave(),
+        }
+    }
+
+    fn scroll(&mut self, phase: GesturePhase, (x, y): (f32, f32), (dx, dy): (f32, f32), (vx, vy): (f32, f32)) {
+        let rt = self.host.runtime_mut();
+        match phase {
+            GesturePhase::Began => { rt.wheel_began(); rt.wheel_xy(x, y, dx, dy); }
+            GesturePhase::Moved => rt.wheel_xy(x, y, dx, dy),
+            GesturePhase::Ended => {
+                rt.wheel_xy(x, y, dx, dy);
+                rt.wheel_ended();
+                // UIKit sends no momentum after the fingers lift: the runtime glides it.
+                if vx != 0.0 || vy != 0.0 { rt.fling_xy(x, y, vx, vy); }
+            }
+        }
     }
 
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase) {

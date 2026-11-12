@@ -6,7 +6,7 @@ use objc2_core_foundation::CGPoint;
 use objc2_foundation_video::NSString;
 use objc2_video::rc::{Allocated, Retained, Weak};
 use objc2_video::runtime::{AnyClass, AnyObject, Sel};
-use objc2_video::{DefinedClass, msg_send};
+use objc2_video::{DefinedClass, class, msg_send, sel};
 
 use super::super::keys;
 use super::super::pacing::Event;
@@ -23,11 +23,15 @@ const GESTURE_BEGAN: isize = 1;
 const GESTURE_CHANGED: isize = 2;
 const GESTURE_ENDED: isize = 3;
 const GESTURE_CANCELLED: isize = 4;
+/// `UIEventButtonMaskSecondary`: a mouse's right button, a trackpad's two-finger click.
+const BUTTON_SECONDARY: isize = 1 << 1;
+/// `UIScrollTypeMaskAll`: a mouse's wheel and a trackpad's two fingers.
+const SCROLL_ALL: isize = 3;
 
 impl RuneView {
     /// Adds a recognizer of `class` that calls `action` on the view. When it begins, UIKit
     /// cancels the touches the view holds, so a pinch never also pans or presses.
-    pub(super) fn recognize(&self, class: &AnyClass, action: Sel) {
+    pub(super) fn recognize(&self, class: &AnyClass, action: Sel) -> Retained<AnyObject> {
         // SAFETY: `initWithTarget:action:` is a gesture recognizer's designated initializer,
         // `action` is a method of this class that takes the recognizer, and the view conforms
         // to `UIGestureRecognizerDelegate`. A recognizer keeps neither its target nor its
@@ -37,7 +41,60 @@ impl RuneView {
             let recognizer: Retained<AnyObject> = msg_send![recognizer, initWithTarget: self, action: action];
             let _: () = msg_send![&*recognizer, setDelegate: self];
             let _: () = msg_send![self, addGestureRecognizer: &*recognizer];
+            recognizer
         }
+    }
+
+    /// Adds what hears a mouse or a trackpad on an iPad: a hover recognizer, and a pan that
+    /// takes scrolls and no touches, so a finger's pan stays the view's own.
+    pub(super) fn recognize_pointer(&self) {
+        self.recognize(class!(UIHoverGestureRecognizer), sel!(runeHover:));
+        let scroll = self.recognize(class!(UIPanGestureRecognizer), sel!(runeScroll:));
+        // SAFETY: a pan recognizer's scroll types are an option set and its touch types an
+        // array of numbers, here none.
+        unsafe {
+            let _: () = msg_send![&*scroll, setAllowedScrollTypesMask: SCROLL_ALL];
+            let none: Retained<AnyObject> = msg_send![class!(NSArray), array];
+            let _: () = msg_send![&*scroll, setAllowedTouchTypes: &*none];
+        }
+    }
+
+    /// The pointer moved over the view, or left it.
+    pub(super) fn hovered(&self, recognizer: &AnyObject) {
+        let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+        self.with_surface(|surface| surface.hover((phase != GesturePhase::Ended).then_some((x, y))));
+        self.pace(Event::Wake);
+    }
+
+    /// A wheel turned or two fingers moved on a trackpad: the content under the pointer moves
+    /// by as much, and two fingers that lift while moving leave it gliding.
+    pub(super) fn scrolled(&self, recognizer: &AnyObject) {
+        let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+        // SAFETY: a pan recognizer's translation and velocity in a view are `CGPoint`s.
+        // Setting the translation back to zero makes the next one the move since this one.
+        let (moved, velocity): (CGPoint, CGPoint) = unsafe {
+            let moved = msg_send![recognizer, translationInView: self];
+            let _: () = msg_send![recognizer, setTranslation: CGPoint::new(0.0, 0.0), inView: self];
+            (moved, msg_send![recognizer, velocityInView: self])
+        };
+        self.with_surface(|surface| surface.scroll(phase, (x, y), (moved.x as f32, moved.y as f32), (velocity.x as f32, velocity.y as f32)));
+        self.track(phase);
+    }
+
+    /// Whether these touches are a secondary click, which opens what a long press opens. The
+    /// runtime hears nothing else of them.
+    pub(super) fn secondary_click(&self, touches: &AnyObject, event: Option<&AnyObject>) -> bool {
+        // SAFETY: an event's `buttonMask` is an option set; a set of touches has any one of
+        // them, whose location in a view is a `CGPoint`.
+        let at: Option<CGPoint> = unsafe {
+            let mask: isize = match event { Some(event) => msg_send![event, buttonMask], None => 0 };
+            let touch: Option<Retained<AnyObject>> = if mask & BUTTON_SECONDARY != 0 { msg_send![touches, anyObject] } else { None };
+            touch.map(|touch| msg_send![&*touch, locationInView: self])
+        };
+        let Some(at) = at else { return false };
+        self.with_surface(|surface| surface.secondary(at.x as f32, at.y as f32));
+        self.pace(Event::Wake);
+        true
     }
 
     /// A recognizer's phase and where its fingers' centre is in the view, or `None` in a state

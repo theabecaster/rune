@@ -1,0 +1,1 @@
+- **iOS: a mouse or trackpad on an iPad.** A `RuneView` hears the pointer hover and leave, a wheel or two fingers on a trackpad scroll the content under it (and glide when the fingers lift moving), and a secondary click opens what a long press opens.

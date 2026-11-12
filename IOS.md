@@ -4,20 +4,31 @@ Rune's experimental iOS target draws one `UIView` on a `CAMetalLayer` with the s
 layout, text and shaders as the desktop. A display link draws at up to 120 Hz while something
 moves and stops when nothing does, so an idle app uses no CPU or GPU.
 
-What works: drawing, light and dark appearance, one finger (tap, drag, pan with momentum), two
-fingers (a pinch to `on_magnify`, a turn to `on_rotate`), safe-area insets (`Cx::safe_area`: pad
-a full-screen root by them so content clears the status bar and the home indicator), text input
-(the soft keyboard shows while a text field has the focus and counts as the safe area's bottom
-inset, so a padded root lifts above it; typing, delete, return, predictions, autocorrection and
-marked text edit the field, and a secure field shows the keyboard none of its text), a hardware
-keyboard (arrows, shortcuts with ⌘ as on a Mac, key repeat), the system pasteboard for copy,
-cut and paste, VoiceOver, Switch Control and Voice Control (the elements come from the same
-accessibility tree the desktop platforms read), the Reduce Motion setting, `Tx::open_url`, a
-long press as the secondary press with `Tx::popup_menu` menus shown as the system's edit menu
-(a field's Cut, Copy and Paste), and stopping in the background. The keyboard is
-told where the field's characters are, so the space bar's trackpad moves the caret. What
-doesn't yet: the system's selection handles and loupe (a field draws its own selection), and
-`on_ready`.
+What works:
+
+- **Drawing.** Light and dark appearance, the screen's own scale, up to 120 Hz, nothing drawn
+  while idle or in the background.
+- **Touch.** One finger taps, drags and pans with momentum; two fingers pinch (`on_magnify`)
+  and turn (`on_rotate`); a long press is the secondary press, so it opens what a right-click
+  opens on a desktop.
+- **Pointer.** A mouse or trackpad on an iPad hovers, clicks, right-clicks and scrolls.
+- **Safe area.** `Cx::safe_area` holds what the status bar, the home indicator and the soft
+  keyboard take: pad a full-screen root by it.
+- **Text input.** The soft keyboard shows while a text field has the focus. Typing, delete,
+  return, predictions, autocorrection, dictation and marked text edit the field; a secure
+  field shows the keyboard none of its text. The keyboard is told where the field's
+  characters are, so the space bar's trackpad moves the caret.
+- **Hardware keyboard.** Arrows, Return, Escape, Tab and the function keys with their
+  modifiers, key repeat, and shortcuts with ⌘ as on a Mac.
+- **Clipboard and menus.** Copy, cut and paste use the system pasteboard. A menu from
+  `Tx::popup_menu` (a field's Cut, Copy and Paste among them) shows as the system's edit menu.
+- **Accessibility.** VoiceOver, Switch Control and Voice Control read the same accessibility
+  tree the desktop platforms do. The Reduce Motion setting is followed.
+- **Links.** `Tx::open_url` opens a link in the app that owns its scheme.
+
+What doesn't yet: the system's selection handles and loupe (a field draws its own selection),
+file dialogs (`Tx::open_file` and the others are refused, as in any embedded view), Dynamic
+Type, and `on_ready`.
 
 ## Build and run in a simulator
 

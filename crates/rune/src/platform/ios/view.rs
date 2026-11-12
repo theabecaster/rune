@@ -254,8 +254,8 @@ define_class!(
         }
 
         #[unsafe(method(touchesBegan:withEvent:))]
-        fn touches_began(&self, touches: &AnyObject, _event: Option<&AnyObject>) {
-            self.touches(touches, TouchPhase::Started);
+        fn touches_began(&self, touches: &AnyObject, event: Option<&AnyObject>) {
+            if !self.secondary_click(touches, event) { self.touches(touches, TouchPhase::Started); }
         }
 
         #[unsafe(method(touchesMoved:withEvent:))]
@@ -271,6 +271,16 @@ define_class!(
         #[unsafe(method(touchesCancelled:withEvent:))]
         fn touches_cancelled(&self, touches: &AnyObject, _event: Option<&AnyObject>) {
             self.touches(touches, TouchPhase::Cancelled);
+        }
+
+        #[unsafe(method(runeHover:))]
+        fn hover(&self, recognizer: &AnyObject) {
+            self.hovered(recognizer);
+        }
+
+        #[unsafe(method(runeScroll:))]
+        fn scroll(&self, recognizer: &AnyObject) {
+            self.scrolled(recognizer);
         }
 
         #[unsafe(method(runeLongPress:))]
@@ -428,6 +438,7 @@ impl RuneView {
         view.recognize(class!(UIPinchGestureRecognizer), sel!(runePinch:));
         view.recognize(class!(UIRotationGestureRecognizer), sel!(runeRotate:));
         view.recognize(class!(UILongPressGestureRecognizer), sel!(runeLongPress:));
+        view.recognize_pointer();
         view
     }
 

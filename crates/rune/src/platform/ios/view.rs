@@ -22,7 +22,7 @@ use crate::a11y::ios::Gesture;
 use super::text::input::RuneTextInput;
 use crate::machine::Seq;
 use crate::platform::main_queue::{after_main, on_main};
-use crate::platform::preferences::reduced_motion;
+use crate::platform::preferences::{reduced_motion, text_scale};
 use crate::runtime::{TouchPhase, Waker};
 use crate::time::Instant;
 
@@ -37,6 +37,7 @@ unsafe extern "C" {
     static UIKeyboardWillChangeFrameNotification: &'static AnyObject;
     static UIKeyboardFrameEndUserInfoKey: &'static AnyObject;
     static UIAccessibilityReduceMotionStatusDidChangeNotification: &'static AnyObject;
+    static UIContentSizeCategoryDidChangeNotification: &'static AnyObject;
 }
 
 #[link(name = "QuartzCore", kind = "framework")]
@@ -370,6 +371,12 @@ define_class!(
             self.pace(Event::Wake);
         }
 
+        #[unsafe(method(runeTextSize:))]
+        fn text_size(&self, _notification: &AnyObject) {
+            self.with_surface(|surface| surface.set_text_scale(text_scale()));
+            self.pace(Event::Wake);
+        }
+
         #[unsafe(method(runeReduceMotion:))]
         fn reduce_motion(&self, _notification: &AnyObject) {
             self.with_surface(|surface| surface.set_reduced_motion(reduced_motion()));
@@ -513,6 +520,7 @@ impl RuneView {
                     Ok(mut surface) => {
                         surface.set_safe_area(self.safe_area());
                         surface.set_reduced_motion(reduced_motion());
+                        surface.set_text_scale(text_scale());
                         // A client that asked before the app started still gets its tree.
                         if self.ivars().accessibility.borrow().asked() { surface.accessibility_wanted(); }
                         Stage::Live(surface)
@@ -570,6 +578,7 @@ impl RuneView {
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeForeground:), name: UIApplicationWillEnterForegroundNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeKeyboard:), name: UIKeyboardWillChangeFrameNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeReduceMotion:), name: UIAccessibilityReduceMotionStatusDidChangeNotification, object: None::<&AnyObject>];
+            let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeTextSize:), name: UIContentSizeCategoryDidChangeNotification, object: None::<&AnyObject>];
             let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];
             let state: isize = msg_send![&*app, applicationState];
             self.pace(Event::Attached { foreground: state != STATE_BACKGROUND });

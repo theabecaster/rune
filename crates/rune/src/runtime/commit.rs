@@ -58,6 +58,8 @@ pub(super) struct Measurement<'a, S: 'static> {
     pub(super) titlebar_inset: f32,
     /// `Cx::safe_area`, in the view's points.
     pub(super) safe_area: [f32; 4],
+    /// `Cx::system_text_scale`.
+    pub(super) system_text_scale: f32,
     pub(super) chrome: crate::ChromeInsets,
     /// Caption buttons drawn over the view's root.
     pub(super) caption: Option<crate::titlebar::Caption>,

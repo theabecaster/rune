@@ -27,6 +27,8 @@ fn send(state: &mut State, tx: &mut Tx) {
 }
 
 fn view(state: &State, cx: &mut Cx<State>) -> El {
+    // The system's text size setting (Dynamic Type on iOS) scales the whole view.
+    cx.zoom(cx.system_text_scale());
     let dark = cx.system_dark();
     let t = tok::theme(dark);
     let [top, right, bottom, left] = cx.safe_area();

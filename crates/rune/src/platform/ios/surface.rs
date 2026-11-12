@@ -76,6 +76,8 @@ pub(crate) trait Surface {
     fn set_dark(&mut self, dark: bool);
     /// The Reduce Motion setting.
     fn set_reduced_motion(&mut self, reduced: bool);
+    /// The text size setting, as a scale of its default.
+    fn set_text_scale(&mut self, scale: f32);
     /// What the screen keeps at the view's top, right, bottom and left edges, in points.
     fn set_safe_area(&mut self, insets: [f32; 4]);
 }
@@ -264,6 +266,8 @@ impl<S: 'static> Surface for Hosted<S> {
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }
 
     fn set_reduced_motion(&mut self, reduced: bool) { self.host.runtime_mut().set_system_reduced_motion(reduced); }
+
+    fn set_text_scale(&mut self, scale: f32) { self.host.runtime_mut().set_system_text_scale(scale); }
 
     fn set_safe_area(&mut self, insets: [f32; 4]) { self.host.runtime_mut().set_safe_area(insets); }
 }

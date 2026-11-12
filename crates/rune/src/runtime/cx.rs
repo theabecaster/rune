@@ -51,6 +51,7 @@ pub struct Cx<S> {
     pub(super) env: Env,
     pub(super) titlebar_inset: f32,
     pub(super) safe_area: [f32; 4],
+    pub(super) system_text_scale: f32,
     pub(super) chrome: crate::ChromeInsets,
     /// `Cx::caption_color`, read once the view returns.
     pub(super) caption_color: Option<Color>,
@@ -79,7 +80,7 @@ impl<S> Cx<S> {
     /// does for a sub-view (a plugin's panel) that panicked partway.
     pub fn retype<T>(&self) -> Cx<T> {
         Cx {
-            env: self.env, titlebar_inset: self.titlebar_inset, safe_area: self.safe_area, chrome: self.chrome, caption_color: self.caption_color,
+            env: self.env, titlebar_inset: self.titlebar_inset, safe_area: self.safe_area, system_text_scale: self.system_text_scale, chrome: self.chrome, caption_color: self.caption_color,
             defaults: self.defaults.clone(),
             titlebar: self.titlebar,
             system_accent: self.system_accent,
@@ -238,6 +239,14 @@ impl<S> Cx<S> {
     /// the screen edges. A `memo` closure that reads it needs nothing in its version.
     pub fn safe_area(&self) -> [f32; 4] {
         self.safe_area
+    }
+
+    /// How much larger or smaller than its default the system's text size setting is: iOS's
+    /// Dynamic Type, where the largest accessibility size is about three. 1 at the default,
+    /// and on platforms that report none. Scale the whole view by it with [`Cx::zoom`], or
+    /// only its type. A `memo` closure that reads it needs nothing in its version.
+    pub fn system_text_scale(&self) -> f32 {
+        self.system_text_scale
     }
     /// The host's OS accessibility preference, independent of this commit's override.
     pub fn system_reduced_motion(&self) -> bool {

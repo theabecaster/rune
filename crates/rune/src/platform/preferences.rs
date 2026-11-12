@@ -82,6 +82,22 @@ pub(crate) fn reduced_motion() -> bool {
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "ios")))]
 pub(crate) fn reduced_motion() -> bool { false }
 
+/// How much larger or smaller than its default the user's text size setting is (Dynamic
+/// Type): what the system scales a body font by.
+#[cfg(target_os = "ios")]
+pub(crate) fn text_scale() -> f32 {
+    use objc2_core_foundation::CGFloat;
+    use objc2_video::rc::Retained;
+    use objc2_video::runtime::AnyObject;
+    use objc2_video::{class, msg_send};
+    // SAFETY: the default font metrics scale a value in points for the current size category.
+    let scaled: CGFloat = unsafe {
+        let metrics: Retained<AnyObject> = msg_send![class!(UIFontMetrics), defaultMetrics];
+        msg_send![&*metrics, scaledValueForValue: 100.0 as CGFloat]
+    };
+    (scaled / 100.0) as f32
+}
+
 /// The desktop's light or dark preference where winit reports none (Linux: the XDG desktop
 /// portal's `color-scheme`). None leaves the host's own default.
 #[cfg(all(target_os = "linux", feature = "dbus"))]

@@ -43,6 +43,18 @@ impl<S: 'static> Runtime<S> {
         true
     }
 
+    /// What [`Cx::system_text_scale`] reports: how much larger or smaller than its default
+    /// the system's text size setting is (iOS's Dynamic Type), 1 at the default. A change
+    /// re-runs the view and its memos. Returns whether it changed. Held between a quarter and
+    /// eight; anything else is 1.
+    pub fn set_system_text_scale(&mut self, scale: f32) -> bool {
+        let next = if scale.is_finite() && scale > 0.0 { scale.clamp(0.25, 8.0) } else { 1.0 };
+        if next == self.system_text_scale { return false; }
+        self.system_text_scale = next;
+        self.dirty = true;
+        true
+    }
+
     pub fn set_system_dark(&mut self, dark: bool) {
         if dark != self.env.system_dark {
             self.env.system_dark = dark;

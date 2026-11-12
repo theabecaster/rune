@@ -23,15 +23,16 @@ What works:
 - **Clipboard and menus.** Copy, cut and paste use the system pasteboard. A menu from
   `Tx::popup_menu` (a field's Cut, Copy and Paste among them) shows as the system's edit menu.
 - **Accessibility.** VoiceOver, Switch Control and Voice Control read the same accessibility
-  tree the desktop platforms do. The Reduce Motion setting is followed.
+  tree the desktop platforms do. The Reduce Motion setting is followed, and
+  `Cx::system_text_scale` is the Dynamic Type size: `cx.zoom(cx.system_text_scale())` scales
+  a view with it.
 - **Links and files.** `Tx::open_url` opens a link in the app that owns its scheme.
   `Tx::open_file` shows the system's document picker and answers with a copy of the file;
   `Tx::open_folder` answers with a folder the app may use until it quits, and `Tx::save_file`
   asks for the folder and answers with the dialog's file name inside it.
 
-What doesn't yet: the system's selection handles and loupe (a field draws its own selection),
-and Dynamic Type. `App::on_ready` runs once
-the first frame is on screen; its handle reaches no window.
+What doesn't yet: the system's selection handles and loupe (a field draws its own selection).
+`App::on_ready` runs once the first frame is on screen; its handle reaches no window.
 
 ## Build and run in a simulator
 

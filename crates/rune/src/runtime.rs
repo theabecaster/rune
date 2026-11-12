@@ -275,6 +275,9 @@ mod line_clamp_tests;
 #[path = "runtime/safe_area_tests.rs"]
 mod safe_area_tests;
 #[cfg(test)]
+#[path = "runtime/text_scale_tests.rs"]
+mod text_scale_tests;
+#[cfg(test)]
 #[path = "runtime/aspect_fit_tests.rs"]
 mod aspect_fit_tests;
 #[cfg(test)]
@@ -451,6 +454,8 @@ pub struct Runtime<S: 'static> {
     system_reduced_motion: bool,
     titlebar_inset: f32,
     safe_area: system_settings::SafeArea,
+    /// `Cx::system_text_scale`: the system's text size setting.
+    system_text_scale: f32,
     system_accent: crate::SystemAccent,
     scroll_bars: system_settings::ScrollBarHost,
     pub time_scale: f32,
@@ -878,6 +883,7 @@ impl<S: 'static> Runtime<S> {
             system_reduced_motion: false,
             titlebar_inset: 0.0,
             safe_area: Default::default(),
+            system_text_scale: 1.0,
             system_accent: crate::SystemAccent::DEFAULT,
             scroll_bars: Default::default(),
             time_scale: 1.0,

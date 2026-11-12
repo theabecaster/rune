@@ -387,7 +387,7 @@ pub(crate) fn enter(
     accent: crate::SystemAccent,
     reduced_motion: bool,
     srgb_blend: bool,
-    chrome: [u32; 8],
+    chrome: [u32; 9],
     caret: Option<(String, [f32; 4])>,
     layout: LayoutRects,
 ) -> Guard {
@@ -449,7 +449,7 @@ pub(crate) fn enter_partial(
     accent: crate::SystemAccent,
     reduced_motion: bool,
     srgb_blend: bool,
-    chrome: [u32; 8],
+    chrome: [u32; 9],
     caret: Option<(String, [f32; 4])>,
     layout: LayoutRects,
 ) -> Guard {
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn a_view_panicking_inside_a_memo_leaves_no_scope_for_the_next_build() {
         let panicked = std::panic::catch_unwind(|| {
-            let _scope = enter(MemoCache::default(), Env::new(true, 1.0), crate::SystemAccent::DEFAULT, false, true, [0; 8], None, LayoutRects::default());
+            let _scope = enter(MemoCache::default(), Env::new(true, 1.0), crate::SystemAccent::DEFAULT, false, true, [0; 9], None, LayoutRects::default());
             memo("outer", 0, || memo("inner", 0, || panic!("view panicked")))
         });
         assert!(panicked.is_err());

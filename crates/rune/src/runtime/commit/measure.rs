@@ -58,6 +58,7 @@ impl<S: 'static> Runtime<S> {
             // The window's controls are in its points; the view's are over the zoom.
             titlebar_inset: self.titlebar_inset / self.zoom.k,
             safe_area: self.safe_area.over(self.zoom.k),
+            system_text_scale: self.system_text_scale,
             chrome: self.titlebar.insets.zoomed(self.zoom.k),
             caption: self.titlebar.caption,
             system_accent: self.system_accent,
@@ -186,12 +187,12 @@ impl<S: 'static> Measurement<'_, S> {
     }
 
     /// What a memo scope hashes of the window's controls and the screen's edges
-    /// (`Cx::titlebar_inset`, `Cx::chrome_insets`, `Cx::safe_area`), so memos that read them
-    /// rebuild when they change.
-    pub(super) fn chrome_bits(&self) -> [u32; 8] {
+    /// (`Cx::titlebar_inset`, `Cx::chrome_insets`, `Cx::safe_area`) and of the system's text
+    /// size (`Cx::system_text_scale`), so memos that read them rebuild when they change.
+    pub(super) fn chrome_bits(&self) -> [u32; 9] {
         let [leading, trailing, height] = self.chrome.bits();
         let [top, right, bottom, left] = self.safe_area.map(f32::to_bits);
-        [self.titlebar_inset.to_bits(), leading, trailing, height, top, right, bottom, left]
+        [self.titlebar_inset.to_bits(), leading, trailing, height, top, right, bottom, left, self.system_text_scale.to_bits()]
     }
 
     pub(super) fn finish(self, tx: &Tx) -> Measured {
@@ -383,6 +384,7 @@ impl<S: 'static> Measurement<'_, S> {
             env: this.env,
             titlebar_inset: this.titlebar_inset,
             safe_area: this.safe_area,
+            system_text_scale: this.system_text_scale,
             chrome: this.chrome,
             caption_color: None,
             titlebar: Default::default(),

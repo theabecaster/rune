@@ -54,9 +54,8 @@ pub(crate) trait Surface {
     fn popup(&mut self) -> Option<Show>;
     /// The menu showing was answered with an item's id, or dismissed.
     fn popup_pick(&mut self, picked: Option<String>);
-    /// The open-file dialog to show, once the frame that asked for it is done. Dialogs iOS has
-    /// no picker for are answered here.
-    fn file_dialog(&mut self) -> Option<(u64, FileDialogOptions)>;
+    /// The file dialog to show, once the frame that asked for it is done.
+    fn file_dialog(&mut self) -> Option<(u64, FileDialogKind, FileDialogOptions)>;
     /// The dialog's answer: the chosen file, none when cancelled, or why it could not show.
     fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>);
     /// A key from the soft keyboard or a hardware one.
@@ -234,17 +233,8 @@ impl<S: 'static> Surface for Hosted<S> {
         if picked.as_deref() == Some("select-all") { self.reopen = at; }
     }
 
-    fn file_dialog(&mut self) -> Option<(u64, FileDialogOptions)> {
-        let rt = self.host.runtime_mut();
-        match rt.take_file_dialog()? {
-            (id, FileDialogKind::Open, options) => Some((id, options)),
-            // The system's picker exports a file that exists and opens a folder only under a
-            // permission the app must hold: neither is a path to write to or read freely.
-            (id, FileDialogKind::Save | FileDialogKind::Folder, _) => {
-                rt.answer_file_dialog(id, Err(FileDialogError("iOS shows no save or folder dialog".into())));
-                None
-            }
-        }
+    fn file_dialog(&mut self) -> Option<(u64, FileDialogKind, FileDialogOptions)> {
+        self.host.runtime_mut().take_file_dialog()
     }
 
     fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>) {

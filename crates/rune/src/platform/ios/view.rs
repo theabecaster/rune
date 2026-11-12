@@ -143,7 +143,7 @@ pub(crate) struct Ivars {
     keyboard: Cell<f32>,
     accessibility: RefCell<Accessibility>,
     /// The file dialog whose picker is up.
-    file_dialog: Cell<Option<u64>>,
+    file_dialog: RefCell<Option<files::Picking>>,
     menu: RefCell<menu::Menu>,
     menu_seq: Cell<Seq>,
     /// What presents the menu, made when the first one opens.
@@ -442,7 +442,7 @@ impl RuneView {
             text: RefCell::new(None),
             keyboard: Cell::new(0.0),
             accessibility: RefCell::new(Accessibility::new()),
-            file_dialog: Cell::new(None),
+            file_dialog: RefCell::new(None),
             menu: RefCell::default(),
             menu_seq: Cell::new(Seq::default()),
             edit_menu: RefCell::new(None),
@@ -597,7 +597,7 @@ impl RuneView {
         let input = self.ivars().text.borrow().clone();
         if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
         if let Some(popup) = popup { self.open_menu(popup); }
-        if let Some((id, options)) = file { self.open_file(id, &options); }
+        if let Some((id, kind, options)) = file { self.pick_file(id, kind, &options); }
         if let Some(tree) = tree {
             let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree);
             posts.post();

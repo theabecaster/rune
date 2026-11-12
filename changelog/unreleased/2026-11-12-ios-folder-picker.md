@@ -1,0 +1,1 @@
+- **iOS: `Tx::open_folder` and `Tx::save_file` show the system's folder picker.** A picked folder is the app's to read and write until it quits. iOS has no dialog that names a file not yet written, so a save asks for the folder and answers with the dialog's file name inside it (`Untitled` when it gives none).

@@ -3,6 +3,8 @@
 //! with one; [`view`] hands one to a UIKit or SwiftUI app that owns its own screens.
 
 #[cfg(target_os = "ios")]
+mod accessibility;
+#[cfg(target_os = "ios")]
 mod app;
 pub(crate) mod keys;
 pub(crate) mod pacing;

@@ -9,6 +9,8 @@ use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
 use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text_doc::Snapshot;
+use crate::a11y::AccessibilityLink;
+use accesskit::{ActionRequest, TreeUpdate};
 use crate::time::Instant;
 
 /// What the focused field tells the keyboard after a frame.
@@ -39,6 +41,12 @@ pub(crate) trait Surface {
     fn ime(&mut self, ime: Ime);
     /// What the focused field tells the keyboard, as of the last frame.
     fn text(&self) -> TextState;
+    /// An assistive client asked for the view's elements: the runtime builds its tree.
+    fn accessibility_wanted(&mut self);
+    /// What a client did to an element, for the next frame.
+    fn accessibility_act(&mut self, request: ActionRequest);
+    /// The accessibility tree's changes since the last frame, while a client listens.
+    fn accessibility(&mut self) -> Option<TreeUpdate>;
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
     /// What the screen keeps at the view's top, right, bottom and left edges, in points.
@@ -49,12 +57,24 @@ struct Hosted<S: 'static> {
     host: LayerHost<S>,
     /// What the app's handles reach it through, kept for as long as the app draws.
     _shared: Arc<Shared<S>>,
+    accessibility: AccessibilityLink,
+    /// The app's name, which names the accessibility tree's root.
+    title: &'static str,
 }
 
 impl<S: 'static> Surface for Hosted<S> {
     fn resize(&mut self, size: (f32, f32), scale: f32) { self.host.resize(size, scale); }
 
-    fn frame(&mut self, target: Instant) -> EmbedFrame { self.host.frame_at(target) }
+    fn frame(&mut self, target: Instant) -> EmbedFrame {
+        self.accessibility.receive(self.host.runtime_mut(), self.title);
+        self.host.frame_at(target)
+    }
+
+    fn accessibility_wanted(&mut self) { self.accessibility.activate(); }
+
+    fn accessibility_act(&mut self, request: ActionRequest) { self.accessibility.act(request); }
+
+    fn accessibility(&mut self) -> Option<TreeUpdate> { self.accessibility.update(self.host.runtime_mut()) }
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
         self.host.runtime_mut().touch(id, phase, x, y, time);
@@ -99,7 +119,7 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
         // view calls this on the main thread.
         let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake.clone())? };
-        let host = host.with_system_clipboard(wake);
-        Ok(Box::new(Hosted { host, _shared: shared }))
+        let host = host.with_system_clipboard(wake.clone());
+        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title }))
     })
 }

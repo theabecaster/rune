@@ -41,10 +41,7 @@ impl Tree<'_> {
         let n = *self.nodes.get(&id.0)?;
         if n.role() == Role::TextRun && !self.runs { return None; }
         // The root's transform scales points to pixels; below it, offsets are points.
-        let origin = match n.transform().filter(|_| !root) {
-            Some(t) => { let c = t.as_coeffs(); [origin[0] + c[4], origin[1] + c[5]] }
-            None => origin,
-        };
+        let origin = super::read::origin(n, origin, root);
         let mut v = json!({ "role": super::roles::name(n.role()) });
         if let Some(key) = n.author_id() { v["key"] = key.into(); }
         if let Some(name) = self.name(n) { v["name"] = name.into(); }
@@ -107,23 +104,6 @@ impl Tree<'_> {
 
     /// The name a reader hears.
     fn name(&self, n: &Node) -> Option<String> {
-        if let Some(l) = n.label() { return Some(l.to_owned()); }
-        if n.role() == Role::Label { return n.value().map(str::to_owned); }
-        if !super::roles::named_by_accesskit(n.role()) { return None; }
-        let mut parts = Vec::new();
-        self.descendant_labels(n, &mut parts);
-        (!parts.is_empty()).then(|| parts.join(" "))
-    }
-
-    fn descendant_labels(&self, n: &Node, out: &mut Vec<String>) {
-        for c in n.children() {
-            let Some(c) = self.nodes.get(&c.0) else { continue };
-            match c.role() {
-                Role::Label => if let Some(v) = c.value() { out.push(v.to_owned()) },
-                Role::Image => if let Some(l) = c.label() { out.push(l.to_owned()) },
-                Role::GenericContainer => self.descendant_labels(c, out),
-                _ => {}
-            }
-        }
+        super::read::name(n, |id| self.nodes.get(&id.0).copied())
     }
 }

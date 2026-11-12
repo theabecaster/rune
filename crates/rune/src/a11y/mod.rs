@@ -12,6 +12,9 @@ use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHan
 use crate::runtime::Runtime;
 
 pub(crate) mod dump;
+#[cfg(any(test, target_os = "ios"))]
+pub(crate) mod ios;
+pub(crate) mod read;
 pub(crate) mod roles;
 
 #[cfg(all(feature = "accessibility", target_os = "macos"))]
@@ -129,6 +132,9 @@ impl AccessibilityLink {
     /// What an assistive client's first request does: the next update holds the whole tree.
     pub fn activate(&self) { self.shared.push(|i| i.asked = Asked::Activate); }
 
+    /// What an assistive client's action does: the link's next turn runs it on the runtime.
+    pub fn act(&self, request: ActionRequest) { self.shared.push(|i| i.actions.push(request)); }
+
     /// Runs what the link heard on `rt`, then returns the tree's changes for the adapter, as a
     /// host's turn does. `name` names the root when the runtime has no window title.
     pub fn service<S: 'static>(&mut self, rt: &mut Runtime<S>, name: &str) -> Option<TreeUpdate> {
@@ -146,7 +152,8 @@ impl AccessibilityLink {
         self.shared.inbox.lock().map(|mut i| std::mem::take(&mut *i)).unwrap_or_default()
     }
 
-    fn receive<S: 'static>(&mut self, rt: &mut Runtime<S>, name: &str) -> bool {
+    /// Runs what the link heard on `rt`: true when an action was queued for the next frame.
+    pub(crate) fn receive<S: 'static>(&mut self, rt: &mut Runtime<S>, name: &str) -> bool {
         self.adopt(rt);
         let inbox = self.take();
         match inbox.asked {
@@ -167,7 +174,8 @@ impl AccessibilityLink {
         queued
     }
 
-    fn update<S: 'static>(&mut self, rt: &mut Runtime<S>) -> Option<TreeUpdate> {
+    /// The tree's changes since the last update, when a client listens.
+    pub(crate) fn update<S: 'static>(&mut self, rt: &mut Runtime<S>) -> Option<TreeUpdate> {
         self.adopt(rt);
         let started = log().then(crate::time::Instant::now);
         let update = rt.a11y_update()?;

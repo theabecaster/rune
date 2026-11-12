@@ -17,7 +17,9 @@ use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOn
 
 use super::pacing::{self, Effect, Event};
 use super::surface::{Mount, Surface};
+use super::accessibility::Accessibility;
 use super::keys;
+use crate::a11y::ios::Gesture;
 use super::text_doc::Effect as Edit;
 use super::text_input::RuneTextInput;
 use crate::machine::{Effects, Seq};
@@ -130,6 +132,7 @@ pub(crate) struct Ivars {
     text: RefCell<Option<Retained<RuneTextInput>>>,
     /// How far the soft keyboard reaches up over the view's bottom edge, in points.
     keyboard: Cell<f32>,
+    accessibility: RefCell<Accessibility>,
     /// The hardware key that repeats while held.
     keys: RefCell<keys::Repeat>,
     key_seq: Cell<Seq>,
@@ -300,6 +303,17 @@ define_class!(
             self.pace(Event::Background);
         }
 
+        /// The view is a container: a reader lands on its elements, never on it.
+        #[unsafe(method(isAccessibilityElement))]
+        fn is_accessibility_element(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method_id(accessibilityElements))]
+        fn accessibility_elements(&self) -> Option<Retained<AnyObject>> {
+            Some(self.accessibility_asked())
+        }
+
         /// With no text field focused the view itself hears a hardware keyboard.
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
@@ -342,6 +356,7 @@ impl RuneView {
             wake_queued: Arc::new(AtomicBool::new(false)),
             text: RefCell::new(None),
             keyboard: Cell::new(0.0),
+            accessibility: RefCell::new(Accessibility::new()),
             keys: RefCell::new(keys::Repeat::Idle),
             key_seq: Cell::new(Seq::default()),
         });
@@ -435,6 +450,8 @@ impl RuneView {
                 match mount(Retained::as_ptr(&layer) as *mut c_void, size, scale, self.dark(), self.waker()) {
                     Ok(mut surface) => {
                         surface.set_safe_area(self.safe_area());
+                        // A client that asked before the app started still gets its tree.
+                        if self.ivars().accessibility.borrow().asked() { surface.accessibility_wanted(); }
                         Stage::Live(surface)
                     }
                     Err(error) => {
@@ -492,6 +509,8 @@ impl RuneView {
             let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];
             let state: isize = msg_send![&*app, applicationState];
             self.pace(Event::Attached { foreground: state != STATE_BACKGROUND });
+            // A reader already running reads the first frame.
+            if Accessibility::reader_running() { self.accessibility_asked(); }
         }
     }
 
@@ -515,14 +534,18 @@ impl RuneView {
         // SAFETY: a C function that reads a clock.
         let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
         let target = Instant::now() + Duration::from_secs_f64(ahead);
-        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text()));
-        let Some((frame, text)) = drawn else {
+        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text(), surface.accessibility()));
+        let Some((frame, text, tree)) = drawn else {
             self.pace(Event::Frame { animating: false, wake_after: None });
             return;
         };
         // The frame applied the input before it: the keyboard hears what the field holds now.
         let input = self.ivars().text.borrow().clone();
         if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
+        if let Some(tree) = tree {
+            let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree);
+            posts.post();
+        }
         self.pace(Event::Frame { animating: frame.animating, wake_after: frame.wake_after_secs });
     }
 
@@ -541,6 +564,26 @@ impl RuneView {
             }
         });
         self.pace(Event::Wake);
+    }
+
+    /// The view's elements, for a client that asks. The first ask starts the runtime's tree,
+    /// and the elements follow the frame it wakes.
+    fn accessibility_asked(&self) -> Retained<AnyObject> {
+        let (list, first) = self.ivars().accessibility.borrow_mut().elements();
+        if first {
+            self.with_surface(|surface| surface.accessibility_wanted());
+            self.pace(Event::Wake);
+        }
+        list
+    }
+
+    /// What a reader did to element `id`: true when the element takes it, which the next frame
+    /// then does.
+    pub(crate) fn accessibility_gesture(&self, id: u64, gesture: Gesture) -> bool {
+        let Some(request) = self.ivars().accessibility.borrow().request(id, gesture) else { return false };
+        self.with_surface(|surface| surface.accessibility_act(request));
+        self.pace(Event::Wake);
+        true
     }
 
     /// Takes the hardware keyboard, unless the keyboard's text input has it for a field.

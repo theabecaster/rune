@@ -11,8 +11,10 @@ a full-screen root by them so content clears the status bar and the home indicat
 inset, so a padded root lifts above it; typing, delete, return, predictions, autocorrection and
 marked text edit the field, and a secure field shows the keyboard none of its text), a hardware
 keyboard (arrows, shortcuts with ⌘ as on a Mac, key repeat), the system pasteboard for copy,
-cut and paste, and stopping in the background. What doesn't yet: moving the caret or selecting
-from the keyboard's own gestures (its rects are the caret's), VoiceOver and `on_ready`.
+cut and paste, VoiceOver, Switch Control and Voice Control (the elements come from the same
+accessibility tree the desktop platforms read), and stopping in the background. What doesn't
+yet: moving the caret or selecting from the keyboard's own gestures (its rects are the
+caret's), and `on_ready`.
 
 ## Build and run in a simulator
 

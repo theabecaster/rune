@@ -196,12 +196,20 @@ impl<S: 'static> LayerHost<S> {
         self.rt.set_viewport((px_w as f32 / scale, px_h as f32 / scale), scale);
     }
 
-    /// Steps animations and layout to `Instant::now()` and presents one Metal frame.
+    /// [`Self::frame_at`] for a host with no presentation time: the frame is stepped to now.
+    pub fn frame(&mut self) -> EmbedFrame {
+        self.frame_at(Instant::now())
+    }
+
+    /// Steps animations and layout to `target`, the time the frame will be on screen, and
+    /// presents one Metal frame. A display link's target time is the one to pass
+    /// (`CADisplayLink.targetTimestamp`, as far ahead of now as it is of `CACurrentMediaTime()`),
+    /// so motion is drawn where it will be when the frame shows, and a late frame loses no time.
     ///
     /// A frame that gets no drawable costs that frame, never the host: a covered surface is
     /// tried again on a wait that doubles, an outdated one is configured again, and one the GPU
     /// refuses to configure rests until a resize. `EmbedFrame::wake_after_secs` carries the wait.
-    pub fn frame(&mut self) -> EmbedFrame {
+    pub fn frame_at(&mut self, target: Instant) -> EmbedFrame {
         if self.suspended {
             return EmbedFrame::default();
         }
@@ -210,7 +218,8 @@ impl<S: 'static> LayerHost<S> {
             return EmbedFrame { wake_after_secs: self.wake_after(t0), ..EmbedFrame::default() };
         }
         let _ = self.backoff.step(BackoffEvent::Lapsed);
-        let (animating, dt) = self.clock.advance(&mut self.rt, t0, false);
+        let compositing = self.compositor.as_ref().is_some_and(|c| c.animating());
+        let (animating, dt) = self.clock.advance(&mut self.rt, target, compositing);
         let update_ms = t0.elapsed().as_secs_f64() * 1000.0;
         crate::clipboard::flush_memory(&mut self.rt);
         if self.rt.popup_menu().is_some() {
@@ -270,6 +279,7 @@ impl<S: 'static> LayerHost<S> {
         self.renderer.submit(&self.gpu.queue, encoder);
         self.gpu.queue.present(frame);
         self.meter.presented();
+        self.clock.presented(&mut self.rt, Instant::now());
         let _ = self.backoff.step(BackoffEvent::Presented);
 
         let cpu_us = t0.elapsed().as_micros() as u64;
@@ -340,5 +350,9 @@ mod tests {
         let stats = host.surface_stats();
         assert_eq!((stats.totals.redraws, stats.totals.presents, stats.totals.failed()), (1, 1, 0));
         assert_eq!(host.runtime().surface_stats().map(|s| s.totals.presents), Some(1));
+        // A frame aimed at a display tick ahead of now draws too, and the clock keeps its target.
+        let target = crate::time::Instant::now() + std::time::Duration::from_millis(8);
+        assert!(host.frame_at(target).drew);
+        assert_eq!(host.clock.last(), target);
     }
 }

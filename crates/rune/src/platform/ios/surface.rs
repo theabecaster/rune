@@ -7,12 +7,13 @@ use std::sync::Arc;
 use crate::app::{App, Shared};
 use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
+use crate::time::Instant;
 
 pub(crate) trait Surface {
     /// The view's size in points and its display scale.
     fn resize(&mut self, size: (f32, f32), scale: f32);
-    /// Steps the app to now and presents a frame.
-    fn frame(&mut self) -> EmbedFrame;
+    /// Steps the app to `target`, when the frame will be on screen, and presents it.
+    fn frame(&mut self, target: Instant) -> EmbedFrame;
     /// One finger's event at (x, y) in the view's points, `time` in seconds since boot.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64);
     /// The system's appearance.
@@ -30,7 +31,7 @@ struct Hosted<S: 'static> {
 impl<S: 'static> Surface for Hosted<S> {
     fn resize(&mut self, size: (f32, f32), scale: f32) { self.host.resize(size, scale); }
 
-    fn frame(&mut self) -> EmbedFrame { self.host.frame() }
+    fn frame(&mut self, target: Instant) -> EmbedFrame { self.host.frame_at(target) }
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
         self.host.runtime_mut().touch(id, phase, x, y, time);

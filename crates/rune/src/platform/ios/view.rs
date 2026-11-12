@@ -7,6 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_video::rc::{Retained, Weak};
@@ -18,6 +19,7 @@ use super::surface::{Mount, Surface};
 use crate::machine::Seq;
 use crate::platform::main_queue::{after_main, on_main};
 use crate::runtime::{TouchPhase, Waker};
+use crate::time::Instant;
 
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
@@ -26,7 +28,10 @@ unsafe extern "C" {
 }
 
 #[link(name = "QuartzCore", kind = "framework")]
-unsafe extern "C" {}
+unsafe extern "C" {
+    /// Seconds on the clock a display link's timestamps are on.
+    fn CACurrentMediaTime() -> f64;
+}
 
 #[link(name = "Foundation", kind = "framework")]
 unsafe extern "C" {
@@ -187,8 +192,13 @@ define_class!(
         }
 
         #[unsafe(method(runeTick:))]
-        fn tick(&self, _link: &AnyObject) {
-            let frame = self.with_surface(|surface| surface.frame());
+        fn tick(&self, link: &AnyObject) {
+            // SAFETY: a display link's `targetTimestamp` is a `CFTimeInterval`.
+            let shown: f64 = unsafe { msg_send![link, targetTimestamp] };
+            // SAFETY: a C function that reads a clock.
+            let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
+            let target = Instant::now() + Duration::from_secs_f64(ahead);
+            let frame = self.with_surface(|surface| surface.frame(target));
             let (animating, wake_after) = frame.map_or((false, None), |f| (f.animating, f.wake_after_secs));
             self.pace(Event::Frame { animating, wake_after });
         }

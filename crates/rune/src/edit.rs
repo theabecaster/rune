@@ -25,6 +25,7 @@ pub(crate) use ime::ImeText;
 mod input;
 mod keys;
 pub use keys::{Key, KeyEvent, KeySide, Modifier, Mods};
+pub(crate) use keys::MAC_KEYS;
 mod marks;
 mod model;
 pub use model::{Block, MAX_LIST_LEVEL, Mark, MarkRange, ParagraphInfo, RichStyle};

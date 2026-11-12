@@ -132,6 +132,47 @@ define_class!(
             true
         }
 
+        // The standard edit actions, which UIKit sends a first responder for the three-finger
+        // copy, cut and paste gestures and from any system menu. The field does each itself,
+        // as for the hardware keyboard's shortcut, with Rune's clipboard.
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, _sender: Option<&AnyObject>) { self.command('a'); }
+
+        #[unsafe(method(copy:))]
+        fn copy(&self, _sender: Option<&AnyObject>) { self.command('c'); }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, _sender: Option<&AnyObject>) { self.command('x'); }
+
+        #[unsafe(method(paste:))]
+        fn paste(&self, _sender: Option<&AnyObject>) { self.command('v'); }
+
+        /// A hardware key: the host's when it names an edit, a move or a shortcut, and UIKit's
+        /// when it types a character or the keyboard is composing.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let composing = self.ivars().doc.borrow().marked().is_some();
+            let taken = !composing && self.ivars().host.load().is_some_and(|host| host.presses(presses, true, true));
+            if !taken {
+                // SAFETY: UIKit's own handling, which types the key into this text input.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if let Some(host) = self.ivars().host.load() { host.presses(presses, false, true); }
+            // SAFETY: as in `pressesBegan:withEvent:`.
+            let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if let Some(host) = self.ivars().host.load() { host.presses(presses, false, true); }
+            // SAFETY: as in `pressesBegan:withEvent:`.
+            let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+        }
+
         #[unsafe(method(isSecureTextEntry))]
         fn is_secure(&self) -> bool {
             self.ivars().secure.get()
@@ -338,6 +379,11 @@ impl RuneTextInput {
         (0..=self.ivars().doc.borrow().len() as isize).contains(&to).then(|| Position::new(to as usize))
     }
 
+    /// Sends the field the shortcut Command plus `c`.
+    fn command(&self, c: char) {
+        if let Some(host) = self.ivars().host.load() { host.command(c); }
+    }
+
     /// An edit the keyboard made: the copy takes it now, and the runtime hears of it.
     fn edit(&self, event: Event) {
         let effects = self.ivars().doc.borrow_mut().step(event);
@@ -364,10 +410,14 @@ impl RuneTextInput {
                         let _: () = msg_send![&**delegate, textWillChange: self];
                         let _: () = msg_send![&**delegate, textDidChange: self];
                     }
-                    Effect::SelectionChanged => {
+                    // UIKit answers news of a selected range by collapsing it to its end (it
+                    // draws no selection here to keep), so it hears only of a caret that moved
+                    // and reads a range when it next needs one.
+                    Effect::SelectionChanged if ivars.doc.borrow().selection().is_empty() => {
                         let _: () = msg_send![&**delegate, selectionWillChange: self];
                         let _: () = msg_send![&**delegate, selectionDidChange: self];
                     }
+                    Effect::SelectionChanged => {}
                     Effect::Key(_) | Effect::Commit(_) | Effect::Preedit(..) | Effect::Select(_) => {}
                 }
             }
@@ -378,7 +428,11 @@ impl RuneTextInput {
             if wanted && !first {
                 let _: bool = msg_send![self, becomeFirstResponder];
             } else if !wanted && first {
-                let _: bool = msg_send![self, resignFirstResponder];
+                // The host takes the hardware keyboard back, which also puts the soft one away.
+                match ivars.host.load() {
+                    Some(host) => { let _: bool = msg_send![&*host, becomeFirstResponder]; }
+                    None => { let _: bool = msg_send![self, resignFirstResponder]; }
+                }
             } else if first && was_secure != secure {
                 // The keyboard reads the field's traits when it attaches.
                 let _: () = msg_send![self, reloadInputViews];

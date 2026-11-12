@@ -106,8 +106,8 @@ impl TextEdit {
         if !matches!(&ev.key, Key::Text(_) | Key::Backspace | Key::Delete | Key::Enter) { self.break_history_group(); }
         // ⌘ moves to a line's edge on macOS. Elsewhere Ctrl, which also sets `cmd`, moves by
         // word as Option does on macOS; `cmd` with no Ctrl (a script) keeps the line edge.
-        let word = m.alt || (m.ctrl && !cfg!(target_os = "macos"));
-        let line = m.cmd && (cfg!(target_os = "macos") || !m.ctrl);
+        let word = m.alt || (m.ctrl && !crate::edit::MAC_KEYS);
+        let line = m.cmd && (crate::edit::MAC_KEYS || !m.ctrl);
         match &ev.key {
             Key::Text(s) => {
                 if s.chars().any(|c| !c.is_control() || (!self.is_single_line() && matches!(c, '\n' | '\r' | '\t'))) {
@@ -247,7 +247,7 @@ impl TextEdit {
             // edge, and with Ctrl to the text's ends.
             Key::Home | Key::End => {
                 let end = ev.key == Key::End;
-                let i = if cfg!(target_os = "macos") || m.ctrl { if end { self.text.len() } else { 0 } } else { self.line_edge(layout, end) };
+                let i = if crate::edit::MAC_KEYS || m.ctrl { if end { self.text.len() } else { 0 } } else { self.line_edge(layout, end) };
                 self.set(i, m.shift)
             }
             Key::Up | Key::Down => {
@@ -286,7 +286,7 @@ impl TextEdit {
             Key::Command(_) => match ev.edit_command() {
                 Some('z') if m.shift => self.redo(),
                 Some('z') => self.undo(),
-                Some('y') if !cfg!(target_os = "macos") => self.redo(),
+                Some('y') if !crate::edit::MAC_KEYS => self.redo(),
                 Some('a') => {
                     self.anchor = 0;
                     self.focus = self.text.len();
@@ -350,7 +350,7 @@ impl TextEdit {
         Some(match landing {
             // Off macOS a word to the right goes on past the spaces after it where the text runs
             // left to right, as Chromium's Ctrl+Right lands at the next word's start.
-            Landing::At(mut j, mut side) if arrow == Arrow::WordRight && !cfg!(target_os = "macos") => {
+            Landing::At(mut j, mut side) if arrow == Arrow::WordRight && !crate::edit::MAC_KEYS => {
                 while super::caret_motion::space_right(l, j, side)
                     && let Some((Landing::At(k, s), _)) = visual_in(l, j, side, Arrow::Right, hidden)
                 {

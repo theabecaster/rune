@@ -35,7 +35,7 @@ pub(crate) fn key_named(name: &str) -> Option<Key> {
 pub(crate) fn script_mods(e: &serde_json::Value) -> crate::Mods {
     let flag = |k: &str| e[k].as_bool().unwrap_or(false);
     let cmd = flag("cmd");
-    let mac = cfg!(target_os = "macos");
+    let mac = crate::edit::MAC_KEYS;
     crate::Mods { shift: flag("shift"), cmd, alt: flag("alt"), ctrl: flag("ctrl") || (cmd && !mac), logo: flag("logo") || (cmd && mac) }
 }
 

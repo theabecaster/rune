@@ -68,7 +68,7 @@ fn active(mods: Mods, m: Modifier) -> bool {
 /// `mods` with `m`'s modifier set to `on`, including `cmd` (Command on macOS, Ctrl elsewhere).
 fn with(mut mods: Mods, m: Modifier, on: bool) -> Mods {
     use Modifier::*;
-    let mac = cfg!(target_os = "macos");
+    let mac = crate::edit::MAC_KEYS;
     match m {
         ShiftLeft | ShiftRight => mods.shift = on,
         ControlLeft | ControlRight => { mods.ctrl = on; if !mac { mods.cmd = on; } }
@@ -281,7 +281,7 @@ mod tests {
     fn a_held_modifier_then_a_letter_is_the_usual_chord() {
         let mut rt = runtime(true);
         let cmd = Mods { cmd: true, ..Mods::default() };
-        let code = if cfg!(target_os = "macos") { Code::SuperLeft } else { Code::ControlLeft };
+        let code = if crate::edit::MAC_KEYS { Code::SuperLeft } else { Code::ControlLeft };
         modifier(&mut rt, code, true, Mods::default());
         assert_eq!(rt.state.app[0].mods.cmd, true);
         assert_eq!(rt.state.chords, 0, "the modifier alone is no chord");

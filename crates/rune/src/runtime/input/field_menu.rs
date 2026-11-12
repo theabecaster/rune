@@ -118,7 +118,7 @@ impl<S: 'static> Runtime<S> {
         if self.focus.path() != Some(menu.path.as_str()) && self.live(&menu.path).is_some() {
             self.set_focus(Some(menu.path.clone()), false);
         }
-        let command = |c| KeyEvent { key: Key::Command(c), mods: Mods { cmd: true, ctrl: !cfg!(target_os = "macos"), ..Mods::default() } };
+        let command = |c| KeyEvent { key: Key::Command(c), mods: Mods { cmd: true, ctrl: !crate::edit::MAC_KEYS, ..Mods::default() } };
         match picked {
             "cut" | "copy" | "select-all" => {
                 let ev = command(match picked {

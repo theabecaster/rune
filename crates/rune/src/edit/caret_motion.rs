@@ -64,7 +64,7 @@ impl TextEdit {
         let mut j = i.min(b.len());
         // Off macOS a word forward ends at the next word's start, past the spaces after it, as
         // Chromium's (and Windows') Ctrl+Right does; on macOS at the word's end.
-        if !cfg!(target_os = "macos") {
+        if !crate::edit::MAC_KEYS {
             match self.pill_after(j) {
                 Some(end) => j = end,
                 None => {

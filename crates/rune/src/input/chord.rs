@@ -373,13 +373,13 @@ fn fold(bits: u8, platform: KeyPlatform) -> u8 {
 }
 
 /// The keys `m` says are held, as chord bits for `platform`. `cmd` repeats the key this build
-/// reports as primary: ⌘ (`logo`) on macOS, Ctrl elsewhere (iOS too), Ctrl or ⌘ on the web. A `Mods`
+/// reports as primary: ⌘ (`logo`) on macOS and iOS, Ctrl elsewhere, Ctrl or ⌘ on the web. A `Mods`
 /// with `cmd` and neither key (a script, a test) holds `platform`'s primary.
 fn held(m: Mods, platform: KeyPlatform) -> u8 {
     let bare = m.cmd && !m.ctrl && !m.logo;
     let (ctrl, logo) = if bare || cfg!(target_arch = "wasm32") {
         (m.ctrl, m.logo)
-    } else if cfg!(target_os = "macos") {
+    } else if crate::edit::MAC_KEYS {
         (m.ctrl, m.logo || m.cmd)
     } else {
         (m.ctrl || m.cmd, m.logo)

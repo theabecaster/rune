@@ -18,6 +18,10 @@ pub struct Mods {
     pub logo: bool,
 }
 
+/// Whether this build's keyboard follows the Mac's conventions: ⌘ is the primary modifier, ⌥
+/// moves by word, Control-letter moves as in AppKit. macOS, and iOS for a hardware keyboard.
+pub(crate) const MAC_KEYS: bool = cfg!(any(target_os = "macos", target_os = "ios"));
+
 impl Mods {
     /// Whether the platform's primary shortcut modifier is held: `cmd`.
     pub fn primary(self) -> bool { self.cmd }
@@ -136,7 +140,7 @@ impl KeyEvent {
     /// on Windows and Linux, so text typed with both still inserts there; Option alone types.
     pub(crate) fn is_command_chord(&self) -> bool {
         let m = self.mods;
-        matches!(self.key, Key::Text(_)) && (m.cmd || m.ctrl) && (cfg!(target_os = "macos") || !m.alt)
+        matches!(self.key, Key::Text(_)) && (m.cmd || m.ctrl) && (crate::edit::MAC_KEYS || !m.alt)
     }
 
     /// The standard edit command this is (paste, copy, cut, select all, undo, redo, format):
@@ -151,14 +155,14 @@ impl KeyEvent {
     /// the window menu when no handler takes it. (Option+Space types on macOS.)
     pub(crate) fn is_window_menu_chord(&self) -> bool {
         let m = self.mods;
-        !cfg!(target_os = "macos") && matches!(&self.key, Key::Text(t) if t == " ") && m.alt && !m.ctrl && !m.cmd && !m.logo
+        !crate::edit::MAC_KEYS && matches!(&self.key, Key::Text(t) if t == " ") && m.alt && !m.ctrl && !m.cmd && !m.logo
     }
     /// A macOS Control-letter text binding (Ctrl-A, Ctrl-E, Ctrl-K, …), as in every AppKit field.
     pub(crate) fn control_binding(&self) -> Option<char> {
         let m = self.mods;
         let Key::Text(s) = &self.key else { return None };
         let c = s.chars().next().filter(|_| s.chars().count() == 1)?.to_ascii_lowercase();
-        (cfg!(target_os = "macos") && m.ctrl && !m.cmd && !m.alt && "abefpndhk".contains(c)).then_some(c)
+        (crate::edit::MAC_KEYS && m.ctrl && !m.cmd && !m.alt && "abefpndhk".contains(c)).then_some(c)
     }
 }
 

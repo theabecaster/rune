@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::app::{App, Shared};
 use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
-use crate::{GesturePhase, Ime, Key, KeyEvent, MagnifyEvent, Mods, RotateEvent};
+use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text_doc::Snapshot;
 use crate::time::Instant;
 
@@ -33,8 +33,8 @@ pub(crate) trait Surface {
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
     /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase);
-    /// A key the keyboard typed.
-    fn key(&mut self, key: Key);
+    /// A key from the soft keyboard or a hardware one.
+    fn key(&mut self, key: KeyEvent);
     /// A composition, a commit or a selection from the keyboard.
     fn ime(&mut self, ime: Ime);
     /// What the focused field tells the keyboard, as of the last frame.
@@ -68,7 +68,7 @@ impl<S: 'static> Surface for Hosted<S> {
         self.host.runtime_mut().rotate_event(RotateEvent::new(degrees).at(x, y).phase(phase));
     }
 
-    fn key(&mut self, key: Key) { self.host.runtime_mut().key(KeyEvent { key, mods: Mods::default() }); }
+    fn key(&mut self, key: KeyEvent) { self.host.key(key); }
 
     fn ime(&mut self, ime: Ime) { self.host.runtime_mut().ime(ime); }
 
@@ -98,7 +98,8 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
     Box::new(move |layer, size, scale, dark, wake| {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
         // view calls this on the main thread.
-        let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake)? };
+        let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake.clone())? };
+        let host = host.with_system_clipboard(wake);
         Ok(Box::new(Hosted { host, _shared: shared }))
     })
 }

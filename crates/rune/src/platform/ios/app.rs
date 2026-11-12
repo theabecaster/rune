@@ -110,6 +110,8 @@ define_class!(
                 let _: () = msg_send![&*controller, setView: &*view];
                 let _: () = msg_send![&*window, setRootViewController: &*controller];
                 let _: () = msg_send![&*window, makeKeyAndVisible];
+                // The app's one view hears a hardware keyboard from the start.
+                let _: bool = msg_send![&*view, becomeFirstResponder];
                 window
             };
             *self.ivars().window.borrow_mut() = Some(window);

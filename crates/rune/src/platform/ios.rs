@@ -4,6 +4,7 @@
 
 #[cfg(target_os = "ios")]
 mod app;
+pub(crate) mod keys;
 pub(crate) mod pacing;
 #[cfg(target_os = "ios")]
 mod surface;

@@ -10,16 +10,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_foundation_video::NSString;
 use objc2_video::rc::{Allocated, Retained, Weak};
 use objc2_video::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send, sel};
 
 use super::pacing::{self, Effect, Event};
 use super::surface::{Mount, Surface};
+use super::keys;
 use super::text_doc::Effect as Edit;
 use super::text_input::RuneTextInput;
 use crate::machine::{Effects, Seq};
-use crate::Ime;
+use crate::{Ime, Key, KeyEvent, Mods};
 use crate::platform::main_queue::{after_main, on_main};
 use crate::runtime::{TouchPhase, Waker};
 use crate::GesturePhase;
@@ -128,6 +130,9 @@ pub(crate) struct Ivars {
     text: RefCell<Option<Retained<RuneTextInput>>>,
     /// How far the soft keyboard reaches up over the view's bottom edge, in points.
     keyboard: Cell<f32>,
+    /// The hardware key that repeats while held.
+    keys: RefCell<keys::Repeat>,
+    key_seq: Cell<Seq>,
 }
 
 /// A weak view that crosses threads but is only read on the main one.
@@ -143,6 +148,11 @@ impl MainOnly {
     /// Feeds `event` to the view's pacing, if the view is still alive. Main thread only.
     fn pace(&self, event: Event) {
         if let Some(view) = self.0.load() { view.pace(event); }
+    }
+
+    /// Feeds `event` to the view's key repeat, as `pace` does its pacing.
+    fn keys(&self, event: keys::Event) {
+        if let Some(view) = self.0.load() { view.keys(event); }
     }
 }
 
@@ -285,7 +295,37 @@ define_class!(
 
         #[unsafe(method(runeBackground:))]
         fn background(&self, _notification: &AnyObject) {
+            // The system sends no key-up to an app it puts away.
+            self.keys(keys::Event::Reset);
             self.pace(Event::Background);
+        }
+
+        /// With no text field focused the view itself hears a hardware keyboard.
+        #[unsafe(method(canBecomeFirstResponder))]
+        fn can_become_first_responder(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            if !self.presses(presses, true, false) {
+                // SAFETY: the responder chain's own handling of presses this view leaves alone.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            self.presses(presses, false, false);
+            // SAFETY: as in `pressesBegan:withEvent:`.
+            let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            self.presses(presses, false, false);
+            // SAFETY: as in `pressesBegan:withEvent:`.
+            let _: () = unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
         }
     }
 );
@@ -302,6 +342,8 @@ impl RuneView {
             wake_queued: Arc::new(AtomicBool::new(false)),
             text: RefCell::new(None),
             keyboard: Cell::new(0.0),
+            keys: RefCell::new(keys::Repeat::Idle),
+            key_seq: Cell::new(Seq::default()),
         });
         let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(0.0, 0.0));
         // SAFETY: `initWithFrame:` is `UIView`'s designated initializer.
@@ -489,7 +531,7 @@ impl RuneView {
         self.with_surface(|surface| {
             for edit in edits {
                 match edit {
-                    Edit::Key(key) => surface.key(key),
+                    Edit::Key(key) => surface.key(KeyEvent { key, mods: Mods::default() }),
                     Edit::Commit(text) => surface.ime(Ime::Commit(text)),
                     Edit::Preedit(text, cursor) => surface.ime(Ime::Preedit(text, cursor, Vec::new())),
                     Edit::Select(range) => surface.ime(Ime::Select(range)),
@@ -501,7 +543,85 @@ impl RuneView {
         self.pace(Event::Wake);
     }
 
+    /// Takes the hardware keyboard, unless the keyboard's text input has it for a field.
+    pub(crate) fn take_keys(&self) {
+        // SAFETY: `UIResponder` methods of these signatures.
+        unsafe {
+            let first: bool = msg_send![self, isFirstResponder];
+            if !self.typing() && !first { let _: bool = msg_send![self, becomeFirstResponder]; }
+        }
+    }
+
+    /// Whether the keyboard's text input is first responder, for a focused field.
+    fn typing(&self) -> bool {
+        // SAFETY: a `UIResponder` method of this signature.
+        self.ivars().text.borrow().as_ref().is_some_and(|text| unsafe { msg_send![&**text, isFirstResponder] })
+    }
+
+    /// Hardware keys going down or up, for this view or (`typing`) for its text input. True
+    /// when the runtime took every one of them; otherwise they are UIKit's.
+    pub(crate) fn presses(&self, presses: &AnyObject, down: bool, typing: bool) -> bool {
+        // Presses the text input left to UIKit come up the responder chain to this view, its
+        // superview: they are still UIKit's.
+        if !typing && self.typing() { return false; }
+        let mut read = Vec::new();
+        // SAFETY: `presses` is the `NSSet<UIPress *>` UIKit passes; a press's `key` is a
+        // `UIKey` or nil, whose properties have these types.
+        unsafe {
+            let all: Retained<AnyObject> = msg_send![presses, allObjects];
+            let count: usize = msg_send![&*all, count];
+            for index in 0..count {
+                let press: Retained<AnyObject> = msg_send![&*all, objectAtIndex: index];
+                let key: Option<Retained<AnyObject>> = msg_send![&*press, key];
+                let Some(key) = key else { return false };
+                let base: Retained<NSString> = msg_send![&*key, charactersIgnoringModifiers];
+                let typed: Retained<NSString> = msg_send![&*key, characters];
+                read.push(keys::Press {
+                    usage: msg_send![&*key, keyCode],
+                    flags: msg_send![&*key, modifierFlags],
+                    base: base.to_string(),
+                    typed: typed.to_string(),
+                });
+            }
+        }
+        if !down {
+            for press in &read { self.keys(keys::Event::Up { usage: press.usage }); }
+            return true;
+        }
+        let events: Option<Vec<_>> = read.iter().map(|press| keys::event(press, typing).map(|event| (press.usage, event))).collect();
+        let Some(events) = events else { return false };
+        for (usage, event) in events { self.keys(keys::Event::Down { usage, event }); }
+        true
+    }
+
+    /// The shortcut Command plus `c`, for an edit action UIKit sent (copy, cut, paste, select all).
+    pub(crate) fn command(&self, c: char) {
+        let mods = Mods { cmd: true, logo: true, ..Mods::default() };
+        self.with_surface(|surface| surface.key(KeyEvent { key: Key::Command(c), mods }));
+        self.pace(Event::Wake);
+    }
+
+    /// Steps the key repeat and does what it asks.
+    fn keys(&self, event: keys::Event) {
+        let ivars = self.ivars();
+        let mut seq = ivars.key_seq.get();
+        let effects = keys::step(&mut seq, &mut ivars.keys.borrow_mut(), event);
+        ivars.key_seq.set(seq);
+        let mut sent = false;
+        for effect in effects {
+            match effect {
+                keys::Effect::Send(key) => sent |= self.with_surface(|surface| surface.key(key)).is_some(),
+                keys::Effect::TimerAfter(attempt, seconds) => {
+                    let view = MainOnly(Weak::new(self));
+                    after_main(seconds, move || view.keys(keys::Event::Timer(attempt)));
+                }
+            }
+        }
+        if sent { self.pace(Event::Wake); }
+    }
+
     fn touches(&self, touches: &AnyObject, phase: TouchPhase) {
+        if phase == TouchPhase::Started { self.take_keys(); }
         let mut count = 0;
         self.with_surface(|surface| {
             // SAFETY: `touches` is the `NSSet<UITouch *>` UIKit passes; a touch's location and

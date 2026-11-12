@@ -6,10 +6,12 @@ use std::sync::{Arc, OnceLock};
 
 use crate::compose::{Compositor, Frame};
 use crate::frame::clock::FrameClock;
+use crate::frame::surface_stats::{Pacing, SurfaceMeter, SurfaceStats};
 use crate::render::{Gpu, Renderer};
 use crate::runtime::{Env, Runtime, Waker};
 use crate::time::Instant;
 use crate::tooling::{AppSpec, runtime_for};
+use crate::window::{Backoff, BackoffEvent, Missed};
 
 static SHARED_GPU: OnceLock<Result<Arc<Gpu>, String>> = OnceLock::new();
 
@@ -58,6 +60,11 @@ pub struct LayerHost<S: 'static> {
     rt: Runtime<S>,
     clock: FrameClock,
     suspended: bool,
+    /// Whether the surface took its last configuration. One that didn't has no drawable to give.
+    configured: bool,
+    /// The wait after a frame that got no drawable.
+    backoff: Backoff,
+    meter: SurfaceMeter,
 }
 
 impl<S: 'static> LayerHost<S> {
@@ -92,7 +99,7 @@ impl<S: 'static> LayerHost<S> {
         let srgb_blend = true;
         let (config, _) = crate::window::surface_config(&surface, &gpu.adapter, (px_w, px_h), srgb_blend)
             .ok_or_else(|| "CAMetalLayer has no supported wgpu surface configuration".to_owned())?;
-        surface.configure(&gpu.device, &config);
+        crate::window::configure(&surface, &gpu, &config)?;
         let target_format = config.format.remove_srgb_suffix();
         let mut renderer = Renderer::new(&gpu.device, target_format);
         renderer.set_srgb_blend(true);
@@ -105,6 +112,8 @@ impl<S: 'static> LayerHost<S> {
         let now = Instant::now();
         rt.wall_start = Some(now);
         rt.record_events = false;
+        let meter = SurfaceMeter::new(spec.title, Arc::default());
+        rt.surface_stats = Some(meter.shared());
 
         Ok(Self {
             gpu,
@@ -115,6 +124,9 @@ impl<S: 'static> LayerHost<S> {
             rt,
             clock: FrameClock::new(now),
             suspended: viewport.0 <= 0.0 || viewport.1 <= 0.0,
+            configured: true,
+            backoff: Backoff::default(),
+            meter,
         })
     }
 
@@ -134,6 +146,36 @@ impl<S: 'static> LayerHost<S> {
         &mut self.rt
     }
 
+    /// What this surface asked for, drew and missed, as totals and per-second rates
+    /// ([`Runtime::surface_stats`] reads the same counts).
+    pub fn surface_stats(&self) -> SurfaceStats {
+        crate::frame::surface_stats::read(&self.meter.shared())
+    }
+
+    /// Configures the surface, saying so when the GPU refuses: the host then draws nothing
+    /// until a resize configures it again.
+    fn configure(&mut self) {
+        self.configured = match crate::window::configure(&self.surface, &self.gpu, &self.config) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("rune: an embedded surface refused its configuration: {error}");
+                false
+            }
+        };
+        let _ = self.backoff.step(BackoffEvent::Lapsed);
+    }
+
+    /// Seconds until the host should call `frame` again with nothing moving: the runtime's
+    /// next timer, or the retry of a frame that got no drawable, whichever is sooner.
+    fn wake_after(&self, now: Instant) -> Option<f64> {
+        let timer = self.rt.wake_deadline().and_then(|due| Some((due - self.rt.wall_start?.elapsed().as_secs_f64()).max(0.0)));
+        let retry = self.backoff.deadline().map(|at| at.saturating_duration_since(now).as_secs_f64());
+        match (timer, retry) {
+            (Some(timer), Some(retry)) => Some(timer.min(retry)),
+            (timer, retry) => timer.or(retry),
+        }
+    }
+
     /// Updates the viewport in points and display scale, reconfiguring the Metal swapchain only
     /// when its clamped device-pixel dimensions change.
     pub fn resize(&mut self, viewport: (f32, f32), scale: f32) {
@@ -146,20 +188,28 @@ impl<S: 'static> LayerHost<S> {
         let max_dim = self.gpu.device.limits().max_texture_dimension_2d.max(1);
         let px_w = ((viewport.0 * scale).round() as u32).clamp(1, max_dim);
         let px_h = ((viewport.1 * scale).round() as u32).clamp(1, max_dim);
-        if self.config.width != px_w || self.config.height != px_h {
+        if self.config.width != px_w || self.config.height != px_h || !self.configured {
             self.config.width = px_w;
             self.config.height = px_h;
-            self.surface.configure(&self.gpu.device, &self.config);
+            self.configure();
         }
         self.rt.set_viewport((px_w as f32 / scale, px_h as f32 / scale), scale);
     }
 
     /// Steps animations and layout to `Instant::now()` and presents one Metal frame.
+    ///
+    /// A frame that gets no drawable costs that frame, never the host: a covered surface is
+    /// tried again on a wait that doubles, an outdated one is configured again, and one the GPU
+    /// refuses to configure rests until a resize. `EmbedFrame::wake_after_secs` carries the wait.
     pub fn frame(&mut self) -> EmbedFrame {
         if self.suspended {
             return EmbedFrame::default();
         }
         let t0 = Instant::now();
+        if self.backoff.waiting(t0) {
+            return EmbedFrame { wake_after_secs: self.wake_after(t0), ..EmbedFrame::default() };
+        }
+        let _ = self.backoff.step(BackoffEvent::Lapsed);
         let (animating, dt) = self.clock.advance(&mut self.rt, t0, false);
         let update_ms = t0.elapsed().as_secs_f64() * 1000.0;
         crate::clipboard::flush_memory(&mut self.rt);
@@ -169,13 +219,20 @@ impl<S: 'static> LayerHost<S> {
         self.rt.refuse_file_dialog("native file dialogs are unsupported in embedded views");
 
         let comp_animating = self.compositor.as_ref().is_some_and(|c| c.animating());
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.gpu.device, &self.config);
-                return EmbedFrame { animating: true, ..EmbedFrame::default() };
+        self.meter.redraw(true);
+        let frame = match crate::window::acquire(&self.surface, &self.gpu, &self.config, self.configured, 1, &mut self.meter) {
+            Ok(frame) => frame,
+            Err(missed) => {
+                self.meter.set_pacing(Pacing::Idle);
+                if missed == Missed::Unconfigured {
+                    self.configured = false;
+                    return EmbedFrame::default();
+                }
+                // The host's display link paces a timeout's retry; every other miss waits.
+                let _ = self.backoff.step(BackoffEvent::Missed { missed, paced: true, now: t0 });
+                let waiting = self.backoff.deadline().is_some();
+                return EmbedFrame { animating: !waiting && (animating || comp_animating), wake_after_secs: self.wake_after(t0), ..EmbedFrame::default() };
             }
-            _ => return EmbedFrame { animating: animating || comp_animating, ..EmbedFrame::default() },
         };
 
         let target = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -212,18 +269,17 @@ impl<S: 'static> LayerHost<S> {
         }
         self.renderer.submit(&self.gpu.queue, encoder);
         self.gpu.queue.present(frame);
+        self.meter.presented();
+        let _ = self.backoff.step(BackoffEvent::Presented);
 
         let cpu_us = t0.elapsed().as_micros() as u64;
-        let wake_after_secs = self.rt.wake_deadline().and_then(|d| {
-            let elapsed = self.rt.wall_start?.elapsed().as_secs_f64();
-            Some((d - elapsed).max(0.0))
-        });
         let comp_animating = self.compositor.as_ref().is_some_and(|c| c.animating());
         let keep_ticking = animating || comp_animating || self.rt.has_pending_input() || self.rt.live_pending();
+        self.meter.set_pacing(if keep_ticking { Pacing::DisplayLink } else { Pacing::Idle });
         EmbedFrame {
             drew: true,
             animating: keep_ticking,
-            wake_after_secs,
+            wake_after_secs: self.wake_after(t0),
             cpu_us,
         }
     }
@@ -281,5 +337,8 @@ mod tests {
         let out = host.frame();
         assert!(out.drew);
         assert_eq!(seen.load(Ordering::Relaxed), 42);
+        let stats = host.surface_stats();
+        assert_eq!((stats.totals.redraws, stats.totals.presents, stats.totals.failed()), (1, 1, 0));
+        assert_eq!(host.runtime().surface_stats().map(|s| s.totals.presents), Some(1));
     }
 }

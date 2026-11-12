@@ -70,7 +70,7 @@ pub enum Pacing {
     /// Not drawing: idle, hidden or occluded.
     #[default]
     Idle,
-    /// A running display link (macOS).
+    /// A running display link: the window's on macOS, the host's for an embedded or iOS view.
     DisplayLink,
     /// Moving with no display link running: a frame-interval timer paces it (macOS).
     Unpaced,

@@ -386,17 +386,24 @@ impl RuneView {
     }
 
     fn moved_to_window(&self) {
-        // SAFETY: `UIView.window` is a nullable object, the notification centre and the shared
-        // application are singletons, and the two selectors are methods of this class that
-        // take the notification.
+        // SAFETY: `UIView.window` is a nullable object, a window's screen is never nil and its
+        // `nativeScale` is a `CGFloat`, the notification centre and the shared application are
+        // singletons, and the two selectors are methods of this class that take the
+        // notification.
         unsafe {
             let centre: Retained<AnyObject> = msg_send![class!(NSNotificationCenter), defaultCenter];
             let _: () = msg_send![&*centre, removeObserver: self];
             let window: Option<Retained<AnyObject>> = msg_send![self, window];
-            if window.is_none() {
+            let Some(window) = window else {
                 self.pace(Event::Detached);
                 return;
-            }
+            };
+            // A view on a `CAMetalLayer` starts at one pixel a point, whatever the screen: left
+            // there, the layer is drawn at a third of an iPhone's pixels and stretched.
+            let screen: Retained<AnyObject> = msg_send![&*window, screen];
+            let scale: CGFloat = msg_send![&*screen, nativeScale];
+            let _: () = msg_send![self, setContentScaleFactor: scale];
+            let _: () = msg_send![self, setNeedsLayout];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeBackground:), name: UIApplicationDidEnterBackgroundNotification, object: None::<&AnyObject>];
             let _: () = msg_send![&*centre, addObserver: self, selector: sel!(runeForeground:), name: UIApplicationWillEnterForegroundNotification, object: None::<&AnyObject>];
             let app: Retained<AnyObject> = msg_send![class!(UIApplication), sharedApplication];

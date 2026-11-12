@@ -11,6 +11,7 @@ pub(crate) mod pacing;
 #[cfg(target_os = "ios")]
 mod surface;
 pub(crate) mod text_doc;
+pub(crate) mod text_geometry;
 #[cfg(target_os = "ios")]
 mod text_input;
 #[cfg(target_os = "ios")]

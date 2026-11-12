@@ -9,6 +9,7 @@ use crate::embed::{EmbedFrame, LayerHost};
 use crate::runtime::{TouchPhase, Waker};
 use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text_doc::Snapshot;
+use super::text_geometry::Geometry;
 use crate::a11y::AccessibilityLink;
 use crate::popup_menu::Show;
 use crate::edit::ImeText;
@@ -51,6 +52,8 @@ pub(crate) trait Surface {
     fn ime(&mut self, ime: Ime);
     /// What the focused field tells the keyboard, as of the last frame.
     fn text(&self) -> TextState;
+    /// Where the focused field's characters are, as last drawn.
+    fn text_geometry(&self) -> Option<Geometry>;
     /// An assistive client asked for the view's elements: the runtime builds its tree.
     fn accessibility_wanted(&mut self);
     /// What a client did to an element, for the next frame.
@@ -152,6 +155,10 @@ impl<S: 'static> Surface for Hosted<S> {
             None => Snapshot::Hidden,
         };
         TextState { wanted: rt.wants_text(), snapshot, caret: rt.ime_area.map(|area| rt.to_window(area)), secure }
+    }
+
+    fn text_geometry(&self) -> Option<Geometry> {
+        self.host.runtime().focused_field_lines().map(|lines| Geometry::new(&lines))
     }
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }

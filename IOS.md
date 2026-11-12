@@ -14,9 +14,10 @@ keyboard (arrows, shortcuts with ⌘ as on a Mac, key repeat), the system pasteb
 cut and paste, VoiceOver, Switch Control and Voice Control (the elements come from the same
 accessibility tree the desktop platforms read), the Reduce Motion setting, `Tx::open_url`, a
 long press as the secondary press with `Tx::popup_menu` menus shown as the system's edit menu
-(a field's Cut, Copy and Paste), and stopping in the background. What doesn't
-yet: moving the caret or selecting from the keyboard's own gestures (its rects are the
-caret's), and `on_ready`.
+(a field's Cut, Copy and Paste), and stopping in the background. The keyboard is
+told where the field's characters are, so the space bar's trackpad moves the caret. What
+doesn't yet: the system's selection handles and loupe (a field draws its own selection), and
+`on_ready`.
 
 ## Build and run in a simulator
 

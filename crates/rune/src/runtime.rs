@@ -361,7 +361,7 @@ pub(crate) mod a11y_tree;
 #[path = "a11y/node.rs"]
 mod a11y_node;
 #[path = "a11y/text.rs"]
-mod a11y_text;
+pub(crate) mod a11y_text;
 #[path = "a11y/actions.rs"]
 mod a11y_actions;
 use a11y_actions::A11yAct;

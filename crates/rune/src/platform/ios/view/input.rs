@@ -11,7 +11,8 @@ use objc2_video::{DefinedClass, msg_send};
 use super::super::keys;
 use super::super::pacing::Event;
 use super::super::text_doc::Effect as Edit;
-use super::{MainOnly, RuneView};
+use super::super::text_geometry::Geometry;
+use super::{MainOnly, RuneView, Stage};
 use crate::machine::Effects;
 use crate::platform::main_queue::after_main;
 use crate::runtime::TouchPhase;
@@ -61,6 +62,15 @@ impl RuneView {
             GesturePhase::Moved => {}
         }
         self.pace(Event::Wake);
+    }
+
+    /// Where the focused field's characters are, for the keyboard's text input. None while the
+    /// view's surface is busy with a frame, which asks nothing of the keyboard.
+    pub(crate) fn text_geometry(&self) -> Option<Geometry> {
+        match &*self.ivars().stage.try_borrow().ok()? {
+            Stage::Live(surface) => surface.text_geometry(),
+            Stage::Waiting(_) | Stage::Failed => None,
+        }
     }
 
     /// Carries the keyboard's edits to the runtime, which applies them on its next frame.

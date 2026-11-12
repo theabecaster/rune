@@ -130,6 +130,22 @@ impl Document {
         string[a..b.max(a)].to_owned()
     }
 
+    /// UTF-16 offset `at` of the document as a byte of the field's text, for asking the field
+    /// where it is. None while text is marked or hidden: the field's text is not the
+    /// document's then.
+    pub(crate) fn field_byte(&self, at: usize) -> Option<usize> {
+        let Phase::Plain { .. } = self.phase else { return None };
+        (!self.hidden).then(|| self.start + byte(&self.text, at))
+    }
+
+    /// Byte `at` of the field's text as a UTF-16 offset of the document, held to its ends.
+    pub(crate) fn offset_of(&self, at: usize) -> usize {
+        let within = at.saturating_sub(self.start).min(self.text.len());
+        // A byte inside a character is that character's start.
+        let within = (0..=within).rev().find(|&i| self.text.is_char_boundary(i)).unwrap_or(0);
+        utf16(&self.text, within)
+    }
+
     pub(crate) fn step(&mut self, event: Event) -> Effects<Effect> {
         match event {
             Event::Insert(text) => {

@@ -16,6 +16,7 @@ use objc2_video::runtime::{AnyObject, NSObject, NSObjectProtocol};
 use objc2_video::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send};
 
 use super::text_doc::{Document, Effect, Event, Snapshot};
+use super::text_geometry::Geometry;
 use super::view::{RuneView, UIResponder, UIView};
 
 extern_class!(
@@ -41,6 +42,7 @@ const ORDER: [isize; 3] = [-1, 0, 1];
 /// `UITextLayoutDirectionLeft` and `UITextLayoutDirectionUp`: the two that move backward.
 const DIRECTION_LEFT: isize = 3;
 const DIRECTION_UP: isize = 4;
+const DIRECTION_DOWN: isize = 5;
 /// `NSWritingDirectionNatural`.
 const WRITING_NATURAL: isize = -1;
 
@@ -260,7 +262,15 @@ define_class!(
 
         #[unsafe(method_id(positionFromPosition:inDirection:offset:))]
         fn position_in_direction(&self, position: &Position, direction: isize, offset: isize) -> Option<Retained<Position>> {
-            self.moved(position.at(), if backward(direction) { -offset } else { offset })
+            let signed = if backward(direction) { -offset } else { offset };
+            // A line up or down where the field's lines are known, else by characters.
+            let line = (direction == DIRECTION_UP || direction == DIRECTION_DOWN)
+                .then(|| self.place(position.at())).flatten()
+                .and_then(|(geometry, byte)| geometry.vertical(byte, signed));
+            match line {
+                Some(byte) => Some(Position::new(self.ivars().doc.borrow().offset_of(byte))),
+                None => self.moved(position.at(), signed),
+            }
         }
 
         #[unsafe(method(comparePosition:toPosition:))]
@@ -315,13 +325,17 @@ define_class!(
         fn set_base_writing_direction(&self, _direction: isize, _range: &Span) {}
 
         #[unsafe(method(firstRectForRange:))]
-        fn first_rect(&self, _range: &Span) -> CGRect {
-            self.ivars().caret.get()
+        fn first_rect(&self, range: &Span) -> CGRect {
+            let range = range.range();
+            let rect = self.place(range.start).zip(self.ivars().doc.borrow().field_byte(range.end))
+                .and_then(|((geometry, from), to)| geometry.first_rect(from..to));
+            rect.map_or(self.ivars().caret.get(), cg_rect)
         }
 
         #[unsafe(method(caretRectForPosition:))]
-        fn caret_rect(&self, _position: &Position) -> CGRect {
-            self.ivars().caret.get()
+        fn caret_rect(&self, position: &Position) -> CGRect {
+            let rect = self.place(position.at()).and_then(|(geometry, byte)| geometry.caret(byte));
+            rect.map_or(self.ivars().caret.get(), cg_rect)
         }
 
         #[unsafe(method_id(selectionRectsForRange:))]
@@ -330,14 +344,13 @@ define_class!(
         }
 
         #[unsafe(method_id(closestPositionToPoint:))]
-        fn closest_position(&self, _point: CGPoint) -> Option<Retained<Position>> {
-            Some(Position::new(self.ivars().doc.borrow().selection().end))
+        fn closest_position(&self, point: CGPoint) -> Option<Retained<Position>> {
+            Some(Position::new(self.closest(point)))
         }
 
         #[unsafe(method_id(closestPositionToPoint:withinRange:))]
-        fn closest_position_within(&self, _point: CGPoint, range: &Span) -> Option<Retained<Position>> {
-            let caret = self.ivars().doc.borrow().selection().end;
-            Some(Position::new(caret.clamp(range.range().start, range.range().end)))
+        fn closest_position_within(&self, point: CGPoint, range: &Span) -> Option<Retained<Position>> {
+            Some(Position::new(self.closest(point).clamp(range.range().start, range.range().end)))
         }
 
         #[unsafe(method_id(characterRangeAtPoint:))]
@@ -346,6 +359,11 @@ define_class!(
         }
     }
 );
+
+/// A rect of the view's points as UIKit's.
+fn cg_rect([x, y, w, h]: [f32; 4]) -> CGRect {
+    CGRect::new(CGPoint::new(x as CGFloat, y as CGFloat), CGSize::new(w as CGFloat, h as CGFloat))
+}
 
 /// Whether a `UITextLayoutDirection` moves toward the start of the text.
 fn backward(direction: isize) -> bool {
@@ -366,6 +384,22 @@ impl RuneTextInput {
         });
         // SAFETY: `initWithFrame:` is `UIView`'s designated initializer.
         unsafe { msg_send![super(this), initWithFrame: zero] }
+    }
+
+    /// The field's geometry and the byte of its text at UTF-16 offset `at` of the document,
+    /// where the document is the field's text and the field has drawn.
+    fn place(&self, at: usize) -> Option<(Geometry, usize)> {
+        let byte = self.ivars().doc.borrow().field_byte(at)?;
+        Some((self.ivars().host.load()?.text_geometry()?, byte))
+    }
+
+    /// The document offset nearest `point`: by the field's lines, or the caret's where they
+    /// are not known.
+    fn closest(&self, point: CGPoint) -> usize {
+        let doc = self.ivars().doc.borrow();
+        let caret = doc.selection().end;
+        let found = self.place(caret).and_then(|(geometry, _)| geometry.closest(point.x as f32, point.y as f32));
+        found.map_or(caret, |byte| doc.offset_of(byte))
     }
 
     /// The keyboard's side of the conversation, while it lives.

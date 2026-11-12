@@ -51,6 +51,18 @@ fn offsets_are_utf16_code_units() {
 }
 
 #[test]
+fn offsets_map_to_the_fields_bytes_and_back_except_while_text_is_marked_or_hidden() {
+    let mut doc = Document::default();
+    doc.step(Event::Runtime(Snapshot::Field { text: "é😀x".into(), start: 100, selection: 0..0 }));
+    assert_eq!((doc.field_byte(1), doc.field_byte(3), doc.field_byte(99)), (Some(102), Some(106), Some(107)));
+    assert_eq!((doc.offset_of(102), doc.offset_of(106), doc.offset_of(104), doc.offset_of(5), doc.offset_of(999)), (1, 3, 1, 0, 4));
+    run(&mut doc, Event::SetMarked { text: "か".into(), selection: 1..1 });
+    assert_eq!(doc.field_byte(1), None);
+    doc.step(Event::Runtime(Snapshot::Hidden));
+    assert_eq!(doc.field_byte(0), None);
+}
+
+#[test]
 fn an_autocorrection_selects_the_word_in_the_field_then_commits_over_it() {
     let mut doc = Document::default();
     doc.step(Event::Runtime(Snapshot::Field { text: "teh cat".into(), start: 40, selection: 7..7 }));

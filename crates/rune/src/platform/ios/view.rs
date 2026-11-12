@@ -225,7 +225,7 @@ define_class!(
                 scale
             };
             self.with_surface(|surface| surface.magnify(scale as f32 - 1.0, x, y, phase));
-            self.pace(Event::Wake);
+            self.track(phase);
         }
 
         #[unsafe(method(runeRotate:))]
@@ -240,19 +240,12 @@ define_class!(
             };
             // UIKit's angle grows clockwise; a `RotateEvent`'s counterclockwise.
             self.with_surface(|surface| surface.rotate(-(radians as f32).to_degrees(), x, y, phase));
-            self.pace(Event::Wake);
+            self.track(phase);
         }
 
         #[unsafe(method(runeTick:))]
-        fn tick(&self, link: &AnyObject) {
-            // SAFETY: a display link's `targetTimestamp` is a `CFTimeInterval`.
-            let shown: f64 = unsafe { msg_send![link, targetTimestamp] };
-            // SAFETY: a C function that reads a clock.
-            let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
-            let target = Instant::now() + Duration::from_secs_f64(ahead);
-            let frame = self.with_surface(|surface| surface.frame(target));
-            let (animating, wake_after) = frame.map_or((false, None), |f| (f.animating, f.wake_after_secs));
-            self.pace(Event::Frame { animating, wake_after });
+        fn tick(&self, _link: &AnyObject) {
+            self.pace(Event::Tick);
         }
 
         #[unsafe(method(runeForeground:))]
@@ -412,13 +405,39 @@ impl RuneView {
         }
     }
 
+    /// Tells the pacing a two-finger gesture began, moved or ended.
+    fn track(&self, phase: GesturePhase) {
+        match phase {
+            GesturePhase::Began => self.pace(Event::Hold),
+            GesturePhase::Ended => self.pace(Event::Release),
+            GesturePhase::Moved => {}
+        }
+        self.pace(Event::Wake);
+    }
+
+    /// Draws the frame the display link's next refresh shows, and tells the pacing how it went.
+    fn draw(&self) {
+        let Some(shown) = self.ivars().link.borrow().as_ref().map(|link| {
+            // SAFETY: a display link's `targetTimestamp` is a `CFTimeInterval`.
+            let shown: f64 = unsafe { msg_send![&**link, targetTimestamp] };
+            shown
+        }) else { return };
+        // SAFETY: a C function that reads a clock.
+        let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
+        let target = Instant::now() + Duration::from_secs_f64(ahead);
+        let frame = self.with_surface(|surface| surface.frame(target));
+        let (animating, wake_after) = frame.map_or((false, None), |f| (f.animating, f.wake_after_secs));
+        self.pace(Event::Frame { animating, wake_after });
+    }
+
     fn touches(&self, touches: &AnyObject, phase: TouchPhase) {
+        let mut count = 0;
         self.with_surface(|surface| {
             // SAFETY: `touches` is the `NSSet<UITouch *>` UIKit passes; a touch's location and
             // timestamp are a `CGPoint` and an `NSTimeInterval`.
             unsafe {
                 let all: Retained<AnyObject> = msg_send![touches, allObjects];
-                let count: usize = msg_send![&*all, count];
+                count = msg_send![&*all, count];
                 for index in 0..count {
                     let touch: Retained<AnyObject> = msg_send![&*all, objectAtIndex: index];
                     let at: CGPoint = msg_send![&*touch, locationInView: self];
@@ -429,6 +448,14 @@ impl RuneView {
                 }
             }
         });
+        // Each finger holds the display link from when it lands until it lifts.
+        for _ in 0..count {
+            match phase {
+                TouchPhase::Started => self.pace(Event::Hold),
+                TouchPhase::Ended | TouchPhase::Cancelled => self.pace(Event::Release),
+                TouchPhase::Moved => {}
+            }
+        }
         self.pace(Event::Wake);
     }
 
@@ -447,6 +474,7 @@ impl RuneView {
                         let _: () = unsafe { msg_send![&*link, invalidate] };
                     }
                 }
+                Effect::Draw => self.draw(),
                 Effect::Resume => self.set_paused(false),
                 Effect::Pause => self.set_paused(true),
                 Effect::TimerAfter(attempt, seconds) => {

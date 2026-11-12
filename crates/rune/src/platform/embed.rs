@@ -69,6 +69,8 @@ pub struct LayerHost<S: 'static> {
     clipboard: Option<crate::clipboard::Client>,
     /// The host shows pop-up menus itself.
     popup_menus: bool,
+    /// The host shows file dialogs itself.
+    file_dialogs: bool,
 }
 
 impl<S: 'static> LayerHost<S> {
@@ -133,6 +135,7 @@ impl<S: 'static> LayerHost<S> {
             meter,
             clipboard: None,
             popup_menus: false,
+            file_dialogs: false,
         })
     }
 
@@ -168,6 +171,14 @@ impl<S: 'static> LayerHost<S> {
     /// handler asks for is answered `None` at once.
     pub fn with_popup_menus(mut self) -> Self {
         self.popup_menus = true;
+        self
+    }
+
+    /// The host shows file dialogs itself: it reads [`Runtime::file_dialog`] after a frame,
+    /// shows its own picker and answers with [`Runtime::resolve_file_dialog`]. Without this
+    /// every dialog a handler asks for is refused.
+    pub fn with_file_dialogs(mut self) -> Self {
+        self.file_dialogs = true;
         self
     }
 
@@ -264,7 +275,7 @@ impl<S: 'static> LayerHost<S> {
         if !self.popup_menus && self.rt.popup_menu().is_some() {
             self.rt.cancel_popups();
         }
-        self.rt.refuse_file_dialog("native file dialogs are unsupported in embedded views");
+        if !self.file_dialogs { self.rt.refuse_file_dialog("native file dialogs are unsupported in embedded views"); }
 
         let comp_animating = self.compositor.as_ref().is_some_and(|c| c.animating());
         self.meter.redraw(true);

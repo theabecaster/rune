@@ -26,6 +26,7 @@ use crate::platform::preferences::reduced_motion;
 use crate::runtime::{TouchPhase, Waker};
 use crate::time::Instant;
 
+mod files;
 mod input;
 mod menu;
 
@@ -53,6 +54,12 @@ extern_protocol!(
     /// A gesture recognizer asks its delegate whether another may recognize alongside it.
     #[name = "UIGestureRecognizerDelegate"]
     unsafe trait GestureRecognizerDelegate: NSObjectProtocol {}
+);
+
+extern_protocol!(
+    /// A document picker tells its delegate what was picked, or that nothing was.
+    #[name = "UIDocumentPickerDelegate"]
+    unsafe trait DocumentPickerDelegate: NSObjectProtocol {}
 );
 
 extern_protocol!(
@@ -135,6 +142,8 @@ pub(crate) struct Ivars {
     /// How far the soft keyboard reaches up over the view's bottom edge, in points.
     keyboard: Cell<f32>,
     accessibility: RefCell<Accessibility>,
+    /// The file dialog whose picker is up.
+    file_dialog: Cell<Option<u64>>,
     menu: RefCell<menu::Menu>,
     menu_seq: Cell<Seq>,
     /// What presents the menu, made when the first one opens.
@@ -194,6 +203,19 @@ define_class!(
             // SAFETY: `isKindOfClass:` takes a class and answers a `BOOL`.
             let long_press: bool = unsafe { msg_send![recognizer, isKindOfClass: class!(UILongPressGestureRecognizer)] };
             !long_press || self.long_press_begins(recognizer)
+        }
+    }
+
+    // SAFETY: every method of the protocol is optional.
+    unsafe impl DocumentPickerDelegate for RuneView {
+        #[unsafe(method(documentPicker:didPickDocumentsAtURLs:))]
+        fn document_picked(&self, _picker: &AnyObject, urls: &AnyObject) {
+            self.file_picked(Some(urls));
+        }
+
+        #[unsafe(method(documentPickerWasCancelled:))]
+        fn document_picker_cancelled(&self, _picker: &AnyObject) {
+            self.file_picked(None);
         }
     }
 
@@ -420,6 +442,7 @@ impl RuneView {
             text: RefCell::new(None),
             keyboard: Cell::new(0.0),
             accessibility: RefCell::new(Accessibility::new()),
+            file_dialog: Cell::new(None),
             menu: RefCell::default(),
             menu_seq: Cell::new(Seq::default()),
             edit_menu: RefCell::new(None),
@@ -565,8 +588,8 @@ impl RuneView {
         // SAFETY: a C function that reads a clock.
         let ahead = (shown - unsafe { CACurrentMediaTime() }).max(0.0);
         let target = Instant::now() + Duration::from_secs_f64(ahead);
-        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text(), surface.accessibility(), surface.popup()));
-        let Some((frame, text, tree, popup)) = drawn else {
+        let drawn = self.with_surface(|surface| (surface.frame(target), surface.text(), surface.accessibility(), surface.popup(), surface.file_dialog()));
+        let Some((frame, text, tree, popup, file)) = drawn else {
             self.pace(Event::Frame { animating: false, wake_after: None });
             return;
         };
@@ -574,6 +597,7 @@ impl RuneView {
         let input = self.ivars().text.borrow().clone();
         if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
         if let Some(popup) = popup { self.open_menu(popup); }
+        if let Some((id, options)) = file { self.open_file(id, &options); }
         if let Some(tree) = tree {
             let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree);
             posts.post();

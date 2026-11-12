@@ -24,11 +24,11 @@ What works:
   `Tx::popup_menu` (a field's Cut, Copy and Paste among them) shows as the system's edit menu.
 - **Accessibility.** VoiceOver, Switch Control and Voice Control read the same accessibility
   tree the desktop platforms do. The Reduce Motion setting is followed.
-- **Links.** `Tx::open_url` opens a link in the app that owns its scheme.
+- **Links and files.** `Tx::open_url` opens a link in the app that owns its scheme.
+  `Tx::open_file` shows the system's document picker and answers with a copy of the file.
 
 What doesn't yet: the system's selection handles and loupe (a field draws its own selection),
-file dialogs (`Tx::open_file` and the others are refused, as in any embedded view), Dynamic
-Type, and `on_ready`.
+save and folder dialogs (they answer with an error), Dynamic Type, and `on_ready`.
 
 ## Build and run in a simulator
 

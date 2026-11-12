@@ -11,7 +11,9 @@ use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text_doc::Snapshot;
 use super::text_geometry::Geometry;
 use crate::a11y::AccessibilityLink;
+use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
+use std::path::PathBuf;
 use crate::edit::ImeText;
 use accesskit::{ActionRequest, TreeUpdate};
 use crate::time::Instant;
@@ -51,6 +53,11 @@ pub(crate) trait Surface {
     fn popup(&mut self) -> Option<Show>;
     /// The menu showing was answered with an item's id, or dismissed.
     fn popup_pick(&mut self, picked: Option<String>);
+    /// The open-file dialog to show, once the frame that asked for it is done. Dialogs iOS has
+    /// no picker for are answered here.
+    fn file_dialog(&mut self) -> Option<(u64, FileDialogOptions)>;
+    /// The dialog's answer: the chosen file, none when cancelled, or why it could not show.
+    fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>);
     /// A key from the soft keyboard or a hardware one.
     fn key(&mut self, key: KeyEvent);
     /// A composition, a commit or a selection from the keyboard.
@@ -170,6 +177,23 @@ impl<S: 'static> Surface for Hosted<S> {
         let _ = self.host.runtime_mut().resolve_popup(picked.as_deref());
     }
 
+    fn file_dialog(&mut self) -> Option<(u64, FileDialogOptions)> {
+        let rt = self.host.runtime_mut();
+        match rt.take_file_dialog()? {
+            (id, FileDialogKind::Open, options) => Some((id, options)),
+            // The system's picker exports a file that exists and opens a folder only under a
+            // permission the app must hold: neither is a path to write to or read freely.
+            (id, FileDialogKind::Save | FileDialogKind::Folder, _) => {
+                rt.answer_file_dialog(id, Err(FileDialogError("iOS shows no save or folder dialog".into())));
+                None
+            }
+        }
+    }
+
+    fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>) {
+        self.host.runtime_mut().answer_file_dialog(id, answer.map_err(FileDialogError));
+    }
+
     fn key(&mut self, key: KeyEvent) { self.host.key(key); }
 
     fn ime(&mut self, ime: Ime) { self.host.runtime_mut().ime(ime); }
@@ -207,7 +231,7 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
         // view calls this on the main thread.
         let host = unsafe { LayerHost::from_core_animation_layer(layer, &spec, state, size, scale, dark, wake.clone())? };
-        let mut host = host.with_system_clipboard(wake.clone()).with_popup_menus();
+        let mut host = host.with_system_clipboard(wake.clone()).with_popup_menus().with_file_dialogs();
         // The view is the app's whole host here: links open in the system, as from a window.
         host.runtime_mut().open_urls_natively = true;
         Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title, selected: None }))

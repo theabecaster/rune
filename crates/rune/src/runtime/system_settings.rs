@@ -20,7 +20,29 @@ impl Default for ScrollBarHost {
     }
 }
 
+/// What the host's screen keeps from the app at each edge, in the window's points: top, right,
+/// bottom, left. A phone's status bar, home indicator and rounded corners; a browser's notch.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct SafeArea([f32; 4]);
+
+impl SafeArea {
+    /// In the view's points, which are the window's over the zoom.
+    pub(super) fn over(self, zoom: f32) -> [f32; 4] { self.0.map(|inset| inset / zoom) }
+}
+
 impl<S: 'static> Runtime<S> {
+    /// What [`Cx::safe_area`] reports: the insets, in points, in top/right/bottom/left order. An
+    /// iOS view sets it from its `safeAreaInsets` and a web canvas from the page's; a change
+    /// re-runs the view and its memos. Returns whether it changed. Headless runs keep zero
+    /// unless a test sets one.
+    pub fn set_safe_area(&mut self, insets: [f32; 4]) -> bool {
+        let next = SafeArea(insets.map(|inset| inset.max(0.0)));
+        if next == self.safe_area { return false; }
+        self.safe_area = next;
+        self.dirty = true;
+        true
+    }
+
     pub fn set_system_dark(&mut self, dark: bool) {
         if dark != self.env.system_dark {
             self.env.system_dark = dark;

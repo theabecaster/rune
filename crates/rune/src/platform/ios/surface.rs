@@ -17,6 +17,8 @@ pub(crate) trait Surface {
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64);
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
+    /// What the screen keeps at the view's top, right, bottom and left edges, in points.
+    fn set_safe_area(&mut self, insets: [f32; 4]);
 }
 
 struct Hosted<S: 'static> {
@@ -35,6 +37,8 @@ impl<S: 'static> Surface for Hosted<S> {
     }
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }
+
+    fn set_safe_area(&mut self, insets: [f32; 4]) { self.host.runtime_mut().set_safe_area(insets); }
 }
 
 /// Starts an app on a `CAMetalLayer`, once its view has a size: the layer, the view's size in

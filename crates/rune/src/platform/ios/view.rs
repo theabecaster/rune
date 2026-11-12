@@ -70,6 +70,21 @@ unsafe impl Encode for FrameRateRange {
     const ENCODING: Encoding = Encoding::Struct("CAFrameRateRange", &[f32::ENCODING, f32::ENCODING, f32::ENCODING]);
 }
 
+/// `UIEdgeInsets`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct EdgeInsets {
+    top: CGFloat,
+    left: CGFloat,
+    bottom: CGFloat,
+    right: CGFloat,
+}
+
+// SAFETY: `UIEdgeInsets` is four `CGFloat`s in this order.
+unsafe impl Encode for EdgeInsets {
+    const ENCODING: Encoding = Encoding::Struct("UIEdgeInsets", &[CGFloat::ENCODING, CGFloat::ENCODING, CGFloat::ENCODING, CGFloat::ENCODING]);
+}
+
 const FRAME_RATES: FrameRateRange = FrameRateRange { minimum: 80.0, maximum: 120.0, preferred: 120.0 };
 
 /// What the view draws: an app waiting for the view's first size, an app drawing, or nothing
@@ -139,6 +154,15 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
             let dark = self.dark();
             self.with_surface(|surface| surface.set_dark(dark));
+            self.pace(Event::Wake);
+        }
+
+        #[unsafe(method(safeAreaInsetsDidChange))]
+        fn safe_area_insets_did_change(&self) {
+            // SAFETY: `UIView` implements it with this signature.
+            let _: () = unsafe { msg_send![super(self), safeAreaInsetsDidChange] };
+            let insets = self.safe_area();
+            self.with_surface(|surface| surface.set_safe_area(insets));
             self.pace(Event::Wake);
         }
 
@@ -223,6 +247,14 @@ impl RuneView {
         style == STYLE_DARK
     }
 
+    /// What the screen keeps at the view's top, right, bottom and left edges: the status bar,
+    /// the home indicator and the display's corners where the view reaches them.
+    fn safe_area(&self) -> [f32; 4] {
+        // SAFETY: a `UIView` property of type `UIEdgeInsets`.
+        let insets: EdgeInsets = unsafe { msg_send![self, safeAreaInsets] };
+        [insets.top, insets.right, insets.bottom, insets.left].map(|inset| inset as f32)
+    }
+
     fn laid_out(&self) {
         let (size, scale) = self.metrics();
         if size.0 <= 0.0 || size.1 <= 0.0 { return; }
@@ -233,7 +265,10 @@ impl RuneView {
                 // view keeps it for as long as it lives.
                 let layer: Retained<AnyObject> = unsafe { msg_send![self, layer] };
                 match mount(Retained::as_ptr(&layer) as *mut c_void, size, scale, self.dark(), self.waker()) {
-                    Ok(surface) => Stage::Live(surface),
+                    Ok(mut surface) => {
+                        surface.set_safe_area(self.safe_area());
+                        Stage::Live(surface)
+                    }
                     Err(error) => {
                         eprintln!("rune: this view draws nothing: {error}");
                         Stage::Failed

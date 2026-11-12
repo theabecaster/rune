@@ -272,6 +272,9 @@ mod truncate_fade_tests;
 #[path = "runtime/line_clamp_tests.rs"]
 mod line_clamp_tests;
 #[cfg(test)]
+#[path = "runtime/safe_area_tests.rs"]
+mod safe_area_tests;
+#[cfg(test)]
 #[path = "runtime/aspect_fit_tests.rs"]
 mod aspect_fit_tests;
 #[cfg(test)]
@@ -447,6 +450,7 @@ pub struct Runtime<S: 'static> {
     pub reduced_motion: bool,
     system_reduced_motion: bool,
     titlebar_inset: f32,
+    safe_area: system_settings::SafeArea,
     system_accent: crate::SystemAccent,
     scroll_bars: system_settings::ScrollBarHost,
     pub time_scale: f32,
@@ -873,6 +877,7 @@ impl<S: 'static> Runtime<S> {
             reduced_motion: false,
             system_reduced_motion: false,
             titlebar_inset: 0.0,
+            safe_area: Default::default(),
             system_accent: crate::SystemAccent::DEFAULT,
             scroll_bars: Default::default(),
             time_scale: 1.0,

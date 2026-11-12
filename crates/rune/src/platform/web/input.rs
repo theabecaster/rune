@@ -163,7 +163,7 @@ impl<S: 'static> Running<S> {
                 // A phone reports the visual viewport on every scroll frame as its toolbar moves;
                 // when neither the safe area nor the largest viewport moved, there's nothing to do.
                 let moved = LARGE_VIEWPORT.replace(h) != h;
-                if INSETS.replace(insets) == insets && !moved { return false; }
+                if !self.rt.set_safe_area(insets) && !moved { return false; }
                 if moved { self.resize_surface(window, window.inner_size(), window.scale_factor() as f32); }
                 self.rt.invalidate();
             }

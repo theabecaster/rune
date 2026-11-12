@@ -50,6 +50,7 @@ pub fn commit_generation() -> u64 {
 pub struct Cx<S> {
     pub(super) env: Env,
     pub(super) titlebar_inset: f32,
+    pub(super) safe_area: [f32; 4],
     pub(super) chrome: crate::ChromeInsets,
     /// `Cx::caption_color`, read once the view returns.
     pub(super) caption_color: Option<Color>,
@@ -78,7 +79,7 @@ impl<S> Cx<S> {
     /// does for a sub-view (a plugin's panel) that panicked partway.
     pub fn retype<T>(&self) -> Cx<T> {
         Cx {
-            env: self.env, titlebar_inset: self.titlebar_inset, chrome: self.chrome, caption_color: self.caption_color,
+            env: self.env, titlebar_inset: self.titlebar_inset, safe_area: self.safe_area, chrome: self.chrome, caption_color: self.caption_color,
             defaults: self.defaults.clone(),
             titlebar: self.titlebar,
             system_accent: self.system_accent,
@@ -108,9 +109,10 @@ impl<S> Cx<S> {
         self.env = env;
     }
 
-    /// A nested view on a stage, which no window controls cover.
+    /// A nested view on a stage, which no window controls or screen edges cover.
     pub(crate) fn clear_chrome(&mut self) {
         self.titlebar_inset = 0.0;
+        self.safe_area = [0.0; 4];
         self.chrome = crate::ChromeInsets::default();
     }
 
@@ -230,13 +232,12 @@ impl<S> Cx<S> {
     pub fn focus_color(&self) -> Color {
         self.system_accent.focus(self.env.system_dark)
     }
-    /// Browser safe-area insets in points, in top/right/bottom/left order. Zero on native.
-    /// Apply these inside a full-canvas root so backgrounds can extend to the screen edges.
+    /// What the screen keeps from the app at each edge, in points, in top/right/bottom/left
+    /// order: an iPhone's status bar, home indicator and rounded corners, a browser's notch.
+    /// Zero on the desktop. Apply these inside a full-canvas root so backgrounds can extend to
+    /// the screen edges. A `memo` closure that reads it needs nothing in its version.
     pub fn safe_area(&self) -> [f32; 4] {
-        #[cfg(target_arch = "wasm32")]
-        { crate::platform::web::safe_area() }
-        #[cfg(not(target_arch = "wasm32"))]
-        { [0.0; 4] }
+        self.safe_area
     }
     /// The host's OS accessibility preference, independent of this commit's override.
     pub fn system_reduced_motion(&self) -> bool {

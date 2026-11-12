@@ -11,6 +11,7 @@ use crate::windows::WindowSpec;
 use super::{WakeEvent, Windows};
 use super::Factory;
 
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub fn run<S: 'static>(app: App<S>, args: Args) -> Result<(), String> {
     let accessory = app.accessory;
     run_configured(Box::new(move |_| vec![WindowSpec::from_app("main", app).into()]), args, accessory)

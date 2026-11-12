@@ -602,7 +602,13 @@ impl<S: 'static> App<S> {
         crate::platform::web::run(self)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    /// On iOS the app is the screen: this returns only when it can't start.
+    #[cfg(target_os = "ios")]
+    pub fn try_run(self) -> Result<(), String> {
+        crate::platform::ios::run(self)
+    }
+
+    #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
     pub fn try_run(mut self) -> Result<(), String> {
         let args = match self.argv.take() {
             Some(argv) => Args::parse_from(argv),

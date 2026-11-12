@@ -113,6 +113,8 @@ pub(crate) struct Ivars {
     /// UIKit's `inputDelegate`, which hears that the text or selection changed under it.
     delegate: RefCell<Option<Weak<AnyObject>>>,
     tokenizer: RefCell<Option<Retained<AnyObject>>>,
+    /// The cursor that follows the finger while the space bar is a trackpad, once made.
+    floating: RefCell<Option<Retained<AnyObject>>>,
 }
 
 define_class!(
@@ -132,6 +134,24 @@ define_class!(
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
             true
+        }
+
+        // The space bar as a trackpad. UIKit moves the selection through
+        // `closestPositionToPoint:` as the finger moves, and asks the view to draw the cursor
+        // that floats under the finger between those positions.
+        #[unsafe(method(beginFloatingCursorAtPoint:))]
+        fn begin_floating_cursor(&self, point: CGPoint) {
+            self.float(Some(point), false);
+        }
+
+        #[unsafe(method(updateFloatingCursorAtPoint:))]
+        fn update_floating_cursor(&self, point: CGPoint) {
+            self.float(Some(point), false);
+        }
+
+        #[unsafe(method(endFloatingCursor))]
+        fn end_floating_cursor(&self) {
+            self.float(None, true);
         }
 
         // The standard edit actions, which UIKit sends a first responder for the three-finger
@@ -381,6 +401,7 @@ impl RuneTextInput {
             secure: Cell::new(false),
             delegate: RefCell::new(None),
             tokenizer: RefCell::new(None),
+            floating: RefCell::new(None),
         });
         // SAFETY: `initWithFrame:` is `UIView`'s designated initializer.
         unsafe { msg_send![super(this), initWithFrame: zero] }
@@ -400,6 +421,52 @@ impl RuneTextInput {
         let caret = doc.selection().end;
         let found = self.place(caret).and_then(|(geometry, _)| geometry.closest(point.x as f32, point.y as f32));
         found.map_or(caret, |byte| doc.offset_of(byte))
+    }
+
+    /// Moves the floating cursor to `point`, or with none, settles it onto the caret and fades
+    /// it out. It is a thin bar in the view's tint, the caret's height and a little more, with
+    /// a soft shadow that lifts it off the text, as UIKit's own fields draw theirs.
+    fn float(&self, point: Option<CGPoint>, animated: bool) {
+        /// How much wider and taller than the caret the floating cursor is, in points.
+        const WIDTH: CGFloat = 3.0;
+        const GROW: CGFloat = 4.0;
+        /// Seconds the cursor takes to settle onto the caret.
+        const SETTLE: f64 = 0.2;
+        let caret = self.ivars().caret.get();
+        let cursor = self.ivars().floating.borrow_mut().get_or_insert_with(|| {
+            // SAFETY: a plain view added to this one; its layer's corner radius and shadow
+            // are `CGFloat`s, a `float` and a `CGSize`.
+            unsafe {
+                let cursor: Retained<AnyObject> = msg_send![class!(UIView), new];
+                let tint: Retained<AnyObject> = msg_send![self, tintColor];
+                let _: () = msg_send![&*cursor, setBackgroundColor: &*tint];
+                let _: () = msg_send![&*cursor, setUserInteractionEnabled: false];
+                let layer: Retained<AnyObject> = msg_send![&*cursor, layer];
+                let _: () = msg_send![&*layer, setCornerRadius: WIDTH / 2.0];
+                let _: () = msg_send![&*layer, setShadowOpacity: 0.3f32];
+                let _: () = msg_send![&*layer, setShadowRadius: 3.0 as CGFloat];
+                let _: () = msg_send![&*layer, setShadowOffset: CGSize::new(0.0, 2.0)];
+                let _: () = msg_send![self, addSubview: &*cursor];
+                cursor
+            }
+        }).clone();
+        let height = caret.size.height + GROW;
+        let (centre, alpha): (CGPoint, CGFloat) = match point {
+            Some(point) => (point, 1.0),
+            None => (CGPoint::new(caret.origin.x + caret.size.width / 2.0, caret.origin.y + caret.size.height / 2.0), 0.0),
+        };
+        let frame = CGRect::new(CGPoint::new(centre.x - WIDTH / 2.0, centre.y - height / 2.0), CGSize::new(WIDTH, height));
+        // SAFETY: `UIView`'s animation class methods and a view's frame and alpha. A move
+        // under the finger is not animated; the settle onto the caret is.
+        unsafe {
+            if animated {
+                let _: () = msg_send![class!(UIView), beginAnimations: None::<&NSString>, context: std::ptr::null_mut::<std::ffi::c_void>()];
+                let _: () = msg_send![class!(UIView), setAnimationDuration: SETTLE];
+            }
+            let _: () = msg_send![&*cursor, setFrame: frame];
+            let _: () = msg_send![&*cursor, setAlpha: alpha];
+            if animated { let _: () = msg_send![class!(UIView), commitAnimations]; }
+        }
     }
 
     /// The keyboard's side of the conversation, while it lives.

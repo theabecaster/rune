@@ -1,0 +1,1 @@
+- **iOS: `App::on_ready` runs.** It runs once the app's first frame is on screen, with a handle no window answers, as on the web.

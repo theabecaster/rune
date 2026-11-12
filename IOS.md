@@ -28,7 +28,8 @@ What works:
   `Tx::open_file` shows the system's document picker and answers with a copy of the file.
 
 What doesn't yet: the system's selection handles and loupe (a field draws its own selection),
-save and folder dialogs (they answer with an error), Dynamic Type, and `on_ready`.
+save and folder dialogs (they answer with an error), and Dynamic Type. `App::on_ready` runs once
+the first frame is on screen; its handle reaches no window.
 
 ## Build and run in a simulator
 

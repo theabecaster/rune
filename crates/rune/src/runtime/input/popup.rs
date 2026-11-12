@@ -94,6 +94,12 @@ impl<S: 'static> Runtime<S> {
         Ok(())
     }
 
+    /// Whether the menu showing, or next to show, is a text field's own.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn popup_is_field_menu(&self) -> bool {
+        self.popups.front().is_some_and(|request| request.field.is_some())
+    }
+
     /// The next menu for the shell to open, marked open. `Some(None)` is a request that can't
     /// open (its anchor element is gone, or its ids repeat): answer it with `None`. Nothing while
     /// a menu is open, so menus show one at a time.

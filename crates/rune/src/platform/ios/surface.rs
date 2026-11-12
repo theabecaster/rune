@@ -11,6 +11,7 @@ use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
 use super::text::doc::Snapshot;
 use super::text::geometry::Geometry;
 use crate::a11y::AccessibilityLink;
+use crate::app::OnWindow;
 use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
 use std::path::PathBuf;
@@ -87,9 +88,32 @@ struct Hosted<S: 'static> {
     accessibility: AccessibilityLink,
     /// The app's name, which names the accessibility tree's root.
     title: &'static str,
+    /// `App::on_ready`, which runs once the first frame is on screen, as a window's does.
+    on_ready: Option<OnWindow>,
     /// The focused field's text and selection when the finger that is down landed, if it had
     /// one selected.
     selected: Option<ImeText>,
+    tap: Tap,
+    /// Where the field menu showing was asked for.
+    field_menu: Option<(f32, f32)>,
+    /// A secondary press to make once the next frame is done: it opens the field's menu again.
+    reopen: Option<(f32, f32)>,
+    wake: Waker,
+}
+
+/// How far a finger may move, in points, and still be a tap.
+const TAP_SLOP: f32 = 10.0;
+
+/// A finger on the focused text field, watched for a tap that leaves the caret where it was:
+/// the tap that asks for the field's menu, as in any iOS text field.
+#[derive(Default)]
+enum Tap {
+    #[default]
+    None,
+    /// Down at this point of the field, which held `before`.
+    Down { at: (f32, f32), before: ImeText },
+    /// Lifted without moving: the frame that applies the tap tells whether the caret moved.
+    Lifted { at: (f32, f32), before: ImeText },
 }
 
 impl<S: 'static> Surface for Hosted<S> {
@@ -97,7 +121,23 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn frame(&mut self, target: Instant) -> EmbedFrame {
         self.accessibility.receive(self.host.runtime_mut(), self.title);
-        self.host.frame_at(target)
+        let frame = self.host.frame_at(target);
+        // There is no window to hand over: the handle is one no window answers, as on the web.
+        if frame.drew && let Some(mut ready) = self.on_ready.take() { ready(&crate::WindowHandle::new("main")); }
+        // A tap on the focused field that left its caret where it was asks for the menu.
+        if matches!(self.tap, Tap::Lifted { .. })
+            && let Tap::Lifted { at, before } = std::mem::take(&mut self.tap)
+            && self.host.runtime().ime_text().as_ref() == Some(&before)
+            && self.host.runtime().popup_menu().is_none()
+        {
+            self.reopen = Some(at);
+        }
+        if let Some((x, y)) = self.reopen.take() {
+            self.secondary(x, y);
+            // The press lands in the next frame, which nothing else may ask for.
+            (self.wake)();
+        }
+        frame
     }
 
     fn accessibility_wanted(&mut self) { self.accessibility.activate(); }
@@ -110,7 +150,17 @@ impl<S: 'static> Surface for Hosted<S> {
         let rt = self.host.runtime_mut();
         if phase == TouchPhase::Started && !rt.touching() {
             self.selected = rt.ime_text().filter(|text| !text.selection.is_empty());
+            self.tap = match rt.ime_text().filter(|text| text.selection.is_empty() && rt.on_focused_field(x, y)) {
+                Some(before) => Tap::Down { at: (x, y), before },
+                None => Tap::None,
+            };
         }
+        self.tap = match (std::mem::take(&mut self.tap), phase) {
+            (Tap::Down { at, before }, TouchPhase::Moved) if (x - at.0).hypot(y - at.1) <= TAP_SLOP => Tap::Down { at, before },
+            (Tap::Down { at, before }, TouchPhase::Ended) => Tap::Lifted { at, before },
+            (Tap::Down { at, before }, TouchPhase::Started) => Tap::Down { at, before },
+            _ => Tap::None,
+        };
         rt.touch(id, phase, x, y, time);
     }
 
@@ -166,8 +216,12 @@ impl<S: 'static> Surface for Hosted<S> {
     fn popup(&mut self) -> Option<Show> {
         let rt = self.host.runtime_mut();
         if rt.popup_waits_for_layout() { return None; }
+        let field = rt.popup_is_field_menu();
         match rt.take_popup()? {
-            Some(show) => Some(show),
+            Some(show) => {
+                self.field_menu = field.then_some(show.at);
+                Some(show)
+            }
             // It can't open: its anchor is gone.
             None => { let _ = rt.resolve_popup(None); None }
         }
@@ -175,6 +229,9 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn popup_pick(&mut self, picked: Option<String>) {
         let _ = self.host.runtime_mut().resolve_popup(picked.as_deref());
+        // After Select All a text field shows its menu again, for what is now selected.
+        let at = self.field_menu.take();
+        if picked.as_deref() == Some("select-all") { self.reopen = at; }
     }
 
     fn file_dialog(&mut self) -> Option<(u64, FileDialogOptions)> {
@@ -225,7 +282,8 @@ impl<S: 'static> Surface for Hosted<S> {
 /// points, its scale, whether the system is dark, and the waker other threads call.
 pub(crate) type Mount = Box<dyn FnOnce(*mut c_void, (f32, f32), f32, bool, Waker) -> Result<Box<dyn Surface>, String>>;
 
-pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
+pub(crate) fn mount<S: 'static>(mut app: App<S>) -> Mount {
+    let on_ready = app.on_ready.take();
     let (spec, state, shared) = app.into_parts(None);
     Box::new(move |layer, size, scale, dark, wake| {
         // SAFETY: `layer` is the `CAMetalLayer` of the view that owns this surface, and the
@@ -234,6 +292,6 @@ pub(crate) fn mount<S: 'static>(app: App<S>) -> Mount {
         let mut host = host.with_system_clipboard(wake.clone()).with_popup_menus().with_file_dialogs();
         // The view is the app's whole host here: links open in the system, as from a window.
         host.runtime_mut().open_urls_natively = true;
-        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake), title: spec.title, selected: None }))
+        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake.clone()), wake, title: spec.title, on_ready, selected: None, tap: Tap::None, field_menu: None, reopen: None }))
     })
 }

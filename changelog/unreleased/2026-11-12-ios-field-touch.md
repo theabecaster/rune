@@ -1,0 +1,1 @@
+- **iOS: a text field's touch behaviour follows UIKit's.** While the space bar is a trackpad a cursor floats under the finger and settles onto the caret when it lifts. A tap on the focused field that leaves the caret where it was shows the field's menu, so an empty field offers Paste on a tap. After Select All the menu shows again for what is selected.

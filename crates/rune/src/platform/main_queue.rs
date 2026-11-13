@@ -29,7 +29,6 @@ extern "C" fn run(context: *mut c_void) {
 
 /// Run `f` on the main queue: a view's wake from another thread on iOS, an icon or a video's
 /// turn on macOS.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn on_main(f: impl FnOnce() + Send + 'static) {
     // SAFETY: the main queue outlives the process; `run` frees the context.
     unsafe { dispatch_async_f(&raw const _dispatch_main_q, context(f), run) };

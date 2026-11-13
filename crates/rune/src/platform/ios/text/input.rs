@@ -16,16 +16,17 @@ use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_foundation_video::{NSArray, NSDictionary, NSRange, NSString};
 use objc2_video::rc::{Allocated, Retained, Weak};
 use objc2_video::runtime::{AnyObject, NSObject, NSObjectProtocol};
-use objc2_video::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send};
+use objc2_video::{DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send};
 
 use super::doc::{Document, Effect, Event, Snapshot};
 use super::geometry::Geometry;
 use super::super::view::{RuneView, UIResponder, UIView};
 
 extern_class!(
-    // SAFETY: UIKit's class of this name is an `NSObject` subclass. UIKit keeps it to the main
-    // thread, where `RuneTextInput`'s methods, its only users here, run.
+    // SAFETY: UIKit's class of this name is an `NSObject` subclass that UIKit keeps to the main
+    // thread.
     #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "UITextPosition"]
     struct UITextPosition;
 );
@@ -33,6 +34,7 @@ extern_class!(
 extern_class!(
     // SAFETY: as for `UITextPosition`.
     #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "UITextRange"]
     struct UITextRange;
 );
@@ -55,6 +57,7 @@ const WRITING_NATURAL: isize = -1;
 define_class!(
     // SAFETY: `UITextPosition` is made to be subclassed, and `Position` has no `Drop`.
     #[unsafe(super(UITextPosition, NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "RuneTextPosition"]
     #[ivars = usize]
     struct Position;
@@ -62,8 +65,8 @@ define_class!(
 
 impl Position {
     /// UTF-16 offset `at` of the document.
-    fn new(at: usize) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(at);
+    fn new(mtm: MainThreadMarker, at: usize) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(at);
         // SAFETY: `init` is `UITextPosition`'s initializer.
         unsafe { msg_send![super(this), init] }
     }
@@ -75,6 +78,7 @@ define_class!(
     // SAFETY: `UITextRange` is made to be subclassed with these three overridden, and `Span`
     // has no `Drop`.
     #[unsafe(super(UITextRange, NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "RuneTextRange"]
     #[ivars = (usize, usize)]
     struct Span;
@@ -82,12 +86,12 @@ define_class!(
     impl Span {
         #[unsafe(method_id(start))]
         fn start(&self) -> Retained<Position> {
-            Position::new(self.ivars().0)
+            Position::new(self.mtm(), self.ivars().0)
         }
 
         #[unsafe(method_id(end))]
         fn end(&self) -> Retained<Position> {
-            Position::new(self.ivars().1)
+            Position::new(self.mtm(), self.ivars().1)
         }
 
         #[unsafe(method(isEmpty))]
@@ -99,8 +103,8 @@ define_class!(
 
 impl Span {
     /// UTF-16 range `range` of the document.
-    fn new(range: std::ops::Range<usize>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars((range.start, range.end.max(range.start)));
+    fn new(mtm: MainThreadMarker, range: std::ops::Range<usize>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars((range.start, range.end.max(range.start)));
         // SAFETY: `init` is `UITextRange`'s initializer.
         unsafe { msg_send![super(this), init] }
     }
@@ -236,7 +240,7 @@ define_class!(
 
         #[unsafe(method_id(selectedTextRange))]
         fn selected_text_range(&self) -> Option<Retained<Span>> {
-            Some(Span::new(self.ivars().doc.borrow().selection()))
+            Some(Span::new(self.mtm(), self.ivars().doc.borrow().selection()))
         }
 
         #[unsafe(method(setSelectedTextRange:))]
@@ -246,7 +250,7 @@ define_class!(
 
         #[unsafe(method_id(markedTextRange))]
         fn marked_text_range(&self) -> Option<Retained<Span>> {
-            self.ivars().doc.borrow().marked().map(Span::new)
+            self.ivars().doc.borrow().marked().map(|range| Span::new(self.mtm(), range))
         }
 
         #[unsafe(method_id(markedTextStyle))]
@@ -271,17 +275,17 @@ define_class!(
 
         #[unsafe(method_id(beginningOfDocument))]
         fn beginning_of_document(&self) -> Retained<Position> {
-            Position::new(0)
+            Position::new(self.mtm(), 0)
         }
 
         #[unsafe(method_id(endOfDocument))]
         fn end_of_document(&self) -> Retained<Position> {
-            Position::new(self.ivars().doc.borrow().len())
+            Position::new(self.mtm(), self.ivars().doc.borrow().len())
         }
 
         #[unsafe(method_id(textRangeFromPosition:toPosition:))]
         fn text_range(&self, from: &Position, to: &Position) -> Option<Retained<Span>> {
-            Some(Span::new(from.at().min(to.at())..from.at().max(to.at())))
+            Some(Span::new(self.mtm(), from.at().min(to.at())..from.at().max(to.at())))
         }
 
         #[unsafe(method_id(positionFromPosition:offset:))]
@@ -297,7 +301,7 @@ define_class!(
                 .then(|| self.place(position.at())).flatten()
                 .and_then(|(geometry, byte)| geometry.vertical(byte, signed));
             match line {
-                Some(byte) => Some(Position::new(self.ivars().doc.borrow().offset_of(byte))),
+                Some(byte) => Some(Position::new(self.mtm(), self.ivars().doc.borrow().offset_of(byte))),
                 None => self.moved(position.at(), signed),
             }
         }
@@ -335,13 +339,13 @@ define_class!(
 
         #[unsafe(method_id(positionWithinRange:farthestInDirection:))]
         fn farthest(&self, range: &Span, direction: isize) -> Option<Retained<Position>> {
-            Some(Position::new(if backward(direction) { range.range().start } else { range.range().end }))
+            Some(Position::new(self.mtm(), if backward(direction) { range.range().start } else { range.range().end }))
         }
 
         #[unsafe(method_id(characterRangeByExtendingPosition:inDirection:))]
         fn extending(&self, position: &Position, direction: isize) -> Option<Retained<Span>> {
             let end = if backward(direction) { 0 } else { self.ivars().doc.borrow().len() };
-            Some(Span::new(position.at().min(end)..position.at().max(end)))
+            Some(Span::new(self.mtm(), position.at().min(end)..position.at().max(end)))
         }
 
         #[unsafe(method(baseWritingDirectionForPosition:inDirection:))]
@@ -374,12 +378,12 @@ define_class!(
 
         #[unsafe(method_id(closestPositionToPoint:))]
         fn closest_position(&self, point: CGPoint) -> Option<Retained<Position>> {
-            Some(Position::new(self.closest(point)))
+            Some(Position::new(self.mtm(), self.closest(point)))
         }
 
         #[unsafe(method_id(closestPositionToPoint:withinRange:))]
         fn closest_position_within(&self, point: CGPoint, range: &Span) -> Option<Retained<Position>> {
-            Some(Position::new(self.closest(point).clamp(range.range().start, range.range().end)))
+            Some(Position::new(self.mtm(), self.closest(point).clamp(range.range().start, range.range().end)))
         }
 
         #[unsafe(method_id(characterRangeAtPoint:))]
@@ -491,7 +495,7 @@ impl RuneTextInput {
     /// The position `offset` UTF-16 units from `at`, or none past either end of the document.
     fn moved(&self, at: usize, offset: isize) -> Option<Retained<Position>> {
         let to = at as isize + offset;
-        (0..=self.ivars().doc.borrow().len() as isize).contains(&to).then(|| Position::new(to as usize))
+        (0..=self.ivars().doc.borrow().len() as isize).contains(&to).then(|| Position::new(self.mtm(), to as usize))
     }
 
     /// Sends the field the shortcut Command plus `c`.

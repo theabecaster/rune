@@ -153,6 +153,8 @@ pub(crate) fn step(state: &mut State, event: Event) -> Effects<Effect> {
                 None => Effects::none(),
             }
         }
+        // A press still owed never meets `Shown` or `Answered` (see `Menu::Reopening`): these
+        // two arms end it only so that every state has an answer.
         Event::Shown { at, field } => {
             state.menu = if field { Menu::Showing { at } } else { Menu::Hidden };
             Effects::none()

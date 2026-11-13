@@ -3,10 +3,11 @@
 //! sandbox. A secret stays on this device (`UIPasteboardOptionLocalOnly`), off the Universal
 //! Clipboard, and the worker clears it when its time is up as everywhere else.
 //!
-//! UIKit's headers do not keep `UIPasteboard` to the main thread, which this relies on to run
-//! on the clipboard worker as the other backends do. Watching a held secret reads only the change count. Reading what
-//! another app copied is what makes iOS ask the user to allow the paste, so nothing here reads
-//! content until a paste or a read was asked for.
+//! Reading what another app copied makes iOS ask the user to allow the paste, and the read
+//! blocks its thread until they answer. So the pasteboard is used on the clipboard worker, as
+//! in the other backends and never on the main thread, which UIKit's headers do not keep
+//! `UIPasteboard` to; and nothing here reads content until a paste or a read was asked for.
+//! Watching a held secret reads only the change count.
 use objc2_foundation_video::{NSData, NSString};
 use objc2_video::rc::{Retained, autoreleasepool};
 use objc2_video::runtime::AnyObject;
@@ -33,8 +34,9 @@ pub(super) struct Pasteboard;
 
 fn general() -> Retained<AnyObject> {
     // SAFETY: `+[UIPasteboard generalPasteboard]` returns the shared pasteboard, never nil. This
-    // and every other pasteboard call here runs on the clipboard worker's thread, which relies
-    // on `UIPasteboard` not being kept to the main thread: its header has no such mark.
+    // and every other pasteboard call here runs on the clipboard worker's thread: a read of
+    // another app's copy blocks until the user answers the system's paste prompt, which the
+    // main thread must never do, and UIKit's header does not keep `UIPasteboard` to it.
     unsafe { msg_send![class!(UIPasteboard), generalPasteboard] }
 }
 

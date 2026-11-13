@@ -18,6 +18,7 @@ use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOn
 use super::pacing::{self, Effect, Event};
 use super::surface::{Mount, Surface};
 use super::accessibility::Accessibility;
+use super::edit_menu;
 use super::keys;
 use crate::a11y::ios::Gesture;
 use super::text::input::RuneTextInput;
@@ -146,7 +147,7 @@ pub(crate) struct Ivars {
     accessibility: RefCell<Accessibility>,
     /// The file dialog whose picker is up.
     file_dialog: RefCell<Option<files::Picking>>,
-    menu: RefCell<menu::Menu>,
+    menu: RefCell<edit_menu::State>,
     menu_seq: Cell<Seq>,
     /// What presents the menu, made when the first one opens.
     edit_menu: RefCell<Option<Retained<AnyObject>>>,

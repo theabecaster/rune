@@ -16,8 +16,8 @@ use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use crate::edit::ImeText;
 use crate::PhysicalInput;
+use super::field_touch;
 use super::keys::Stroke;
 use accesskit::{ActionRequest, TreeUpdate};
 use crate::time::Instant;
@@ -101,30 +101,22 @@ struct Hosted<S: 'static> {
     title: &'static str,
     /// `App::on_ready`, which runs once the first frame is on screen, as a window's does.
     on_ready: Option<OnWindow>,
-    /// The focused field's text and selection when the finger that is down landed, if it had
-    /// one selected.
-    selected: Option<ImeText>,
-    tap: Tap,
-    /// Where the field menu showing was asked for.
-    field_menu: Option<(f32, f32)>,
-    /// A secondary press to make once the next frame is done: it opens the field's menu again.
-    reopen: Option<(f32, f32)>,
+    /// What a finger on the focused field is doing, and the field's menu.
+    field: field_touch::State,
     wake: Waker,
 }
 
-/// How far a finger may move, in points, and still be a tap.
-const TAP_SLOP: f32 = 10.0;
-
-/// A finger on the focused text field, watched for a tap that leaves the caret where it was:
-/// the tap that asks for the field's menu, as in any iOS text field.
-#[derive(Default)]
-enum Tap {
-    #[default]
-    None,
-    /// Down at this point of the field, which held `before`.
-    Down { at: (f32, f32), before: ImeText },
-    /// Lifted without moving: the frame that applies the tap tells whether the caret moved.
-    Lifted { at: (f32, f32), before: ImeText },
+impl<S: 'static> Hosted<S> {
+    /// Steps the focused field's finger and menu, and does what the step asks for.
+    fn field_step(&mut self, event: field_touch::Event) {
+        for effect in field_touch::step(&mut self.field, event) {
+            match effect {
+                field_touch::Effect::Select(range) => self.host.runtime_mut().ime(Ime::Select(range)),
+                field_touch::Effect::Press((x, y)) => self.secondary(x, y),
+                field_touch::Effect::Wake => (self.wake)(),
+            }
+        }
+    }
 }
 
 impl<S: 'static> Surface for Hosted<S> {
@@ -140,18 +132,10 @@ impl<S: 'static> Surface for Hosted<S> {
         let frame = self.host.frame_at(target);
         // There is no window to hand over: the handle is one no window answers, as on the web.
         if frame.drew && let Some(mut ready) = self.on_ready.take() { ready(&crate::WindowHandle::new("main")); }
-        // A tap on the focused field that left its caret where it was asks for the menu.
-        if matches!(self.tap, Tap::Lifted { .. })
-            && let Tap::Lifted { at, before } = std::mem::take(&mut self.tap)
-            && self.host.runtime().ime_text().as_ref() == Some(&before)
-            && self.host.runtime().popup_menu().is_none()
-        {
-            self.reopen = Some(at);
-        }
-        if let Some((x, y)) = self.reopen.take() {
-            self.secondary(x, y);
-            // The press lands in the next frame, which nothing else may ask for.
-            (self.wake)();
+        // A tap that left the field's caret where it was, or Select All, opens the field's menu.
+        if self.field.awaits_frame() {
+            let rt = self.host.runtime();
+            self.field_step(field_touch::Event::Frame { text: rt.ime_text(), popup: rt.popup_menu().is_some() });
         }
         frame
     }
@@ -167,21 +151,15 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
         let (vx, vy) = self.in_view(x, y);
-        let rt = self.host.runtime_mut();
-        if phase == TouchPhase::Started && !rt.touching() {
-            self.selected = rt.ime_text().filter(|text| !text.selection.is_empty());
-            self.tap = match rt.ime_text().filter(|text| text.selection.is_empty() && rt.on_focused_field(vx, vy)) {
-                Some(before) => Tap::Down { at: (x, y), before },
-                None => Tap::None,
-            };
-        }
-        self.tap = match (std::mem::take(&mut self.tap), phase) {
-            (Tap::Down { at, before }, TouchPhase::Moved) if (x - at.0).hypot(y - at.1) <= TAP_SLOP => Tap::Down { at, before },
-            (Tap::Down { at, before }, TouchPhase::Ended) => Tap::Lifted { at, before },
-            (Tap::Down { at, before }, TouchPhase::Started) => Tap::Down { at, before },
-            _ => Tap::None,
+        let rt = self.host.runtime();
+        // The field as it is before the runtime hears of the finger, which places the caret.
+        let event = if phase == TouchPhase::Started && !rt.touching() {
+            field_touch::Event::Landed { at: (x, y), text: rt.ime_text(), on_field: rt.on_focused_field(vx, vy) }
+        } else {
+            field_touch::Event::Touch { phase, at: (x, y) }
         };
-        rt.touch(id, phase, vx, vy, time);
+        self.field_step(event);
+        self.host.runtime_mut().touch(id, phase, vx, vy, time);
     }
 
     fn hover(&mut self, at: Option<(f32, f32)>) {
@@ -229,16 +207,13 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn secondary(&mut self, x: f32, y: f32) {
         let (x, y) = self.in_view(x, y);
-        let rt = self.host.runtime_mut();
         // A finger that lands in a field places the caret at once, as a mouse press does, so a
         // long press on selected text would find nothing selected. The selection the finger
         // landed on is put back first; the field's menu then keeps it for a press inside it
         // and moves the caret for one outside, as for a right-click.
-        if let Some(before) = self.selected.take()
-            && rt.ime_text().is_some_and(|now| now.text == before.text && now.start == before.start && now.selection.is_empty())
-        {
-            rt.ime(Ime::Select(before.start + before.selection.start..before.start + before.selection.end));
-        }
+        let text = self.host.runtime().ime_text();
+        self.field_step(field_touch::Event::Pressing { text });
+        let rt = self.host.runtime_mut();
         rt.secondary_down(x, y);
         rt.secondary_up(x, y);
     }
@@ -249,7 +224,7 @@ impl<S: 'static> Surface for Hosted<S> {
         let field = rt.popup_is_field_menu();
         match rt.take_popup()? {
             Some(show) => {
-                self.field_menu = field.then_some(show.at);
+                self.field_step(field_touch::Event::Shown { at: show.at, field });
                 Some((show, field))
             }
             // It can't open: its anchor is gone.
@@ -259,9 +234,7 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn popup_pick(&mut self, picked: Option<String>) {
         let _ = self.host.runtime_mut().resolve_popup(picked.as_deref());
-        // After Select All a text field shows its menu again, for what is now selected.
-        let at = self.field_menu.take();
-        if picked.as_deref() == Some("select-all") { self.reopen = at; }
+        self.field_step(field_touch::Event::Answered { select_all: picked.as_deref() == Some("select-all") });
     }
 
     fn file_dialog(&mut self) -> Option<(u64, FileDialogKind, FileDialogOptions)> {
@@ -343,6 +316,6 @@ pub(crate) fn mount<S: 'static>(mut app: App<S>) -> Mount {
         shared.connect(wake.clone());
         shared.visible.store(true, Ordering::Release);
         let menus = crate::native_menu::Guard::attach(&shared, false);
-        Ok(Box::new(Hosted { host, shared, menus, accessibility: AccessibilityLink::with_wake(wake.clone()), wake, title: spec.title, on_ready, selected: None, tap: Tap::None, field_menu: None, reopen: None }))
+        Ok(Box::new(Hosted { host, shared, menus, accessibility: AccessibilityLink::with_wake(wake.clone()), wake, title: spec.title, on_ready, field: field_touch::State::default() }))
     })
 }

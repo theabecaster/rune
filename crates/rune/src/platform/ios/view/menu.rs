@@ -12,6 +12,7 @@ use objc2_video::runtime::AnyObject;
 use objc2_video::{DefinedClass, class, msg_send, sel};
 
 use super::super::pacing::Event;
+use super::super::edit_menu::{self, Effect};
 use super::{MainOnly, RuneView};
 use crate::machine::Attempt;
 use crate::platform::main_queue::after_main;
@@ -25,24 +26,6 @@ const DISABLED: usize = 1 << 0;
 const ON: isize = 1;
 /// `UIMenuOptionsDisplayInline`: the children show in the parent, set apart, with no title.
 const INLINE: usize = 1 << 0;
-
-/// How long a menu that is going away may still report the item that was tapped. UIKit starts
-/// taking the menu down before it sends the item's action.
-const PICK_GRACE: f64 = 0.25;
-
-/// The view's pop-up menu. The runtime waits for an answer from `Open` until `Closed`.
-#[derive(Default)]
-pub(super) enum Menu {
-    #[default]
-    Closed,
-    /// Up, or on its way up. A text field's menu points at its caret, as UIKit's fields do,
-    /// and follows it: `caret` is where it pointed last. Focusing the field brings up the
-    /// keyboard, which can move the field away from where it was pressed.
-    Open { show: Show, caret: Option<CGRect> },
-    /// Going away: a pick may still arrive, and if none has when this attempt's timer fires,
-    /// the menu was dismissed.
-    Leaving(Attempt),
-}
 
 impl RuneView {
     /// Whether a long press at the recognizer's place would open anything. One that wouldn't
@@ -64,14 +47,85 @@ impl RuneView {
     }
 
     /// Puts `show`'s menu up, at the focused field's caret when it is the field's own menu.
-    /// The interaction asks the view for its items and its place.
     pub(super) fn open_menu(&self, show: Show, field: bool) {
         let caret = field.then(|| self.caret()).flatten();
-        let (x, y) = match caret {
-            Some(rect) => (rect.origin.x as f32 + rect.size.width as f32 / 2.0, rect.origin.y as f32 + rect.size.height as f32 / 2.0),
-            None => show.at,
-        };
-        *self.ivars().menu.borrow_mut() = Menu::Open { show, caret };
+        self.menu_step(edit_menu::Event::Present { show, caret });
+    }
+
+    /// The open menu as a `UIMenu`, for the interaction.
+    pub(super) fn menu_items(&self) -> Option<Retained<AnyObject>> {
+        self.ivars().menu.borrow().show().map(|show| build(&show.menu, "", 0))
+    }
+
+    /// What the open menu points at.
+    pub(super) fn menu_target(&self) -> CGRect {
+        let [x, y, w, h] = self.ivars().menu.borrow().target();
+        CGRect::new(CGPoint::new(x, y), CGSize::new(w, h))
+    }
+
+    /// After a frame: a field's menu that is up moves with the caret.
+    pub(super) fn menu_follow_caret(&self) {
+        if !self.ivars().menu.borrow().follows_caret() { return; }
+        if let Some(caret) = self.caret() { self.menu_step(edit_menu::Event::Caret(caret)); }
+    }
+
+    /// The focused field's caret, where the keyboard's text input has it.
+    fn caret(&self) -> Option<edit_menu::Rect> {
+        let rect = self.ivars().text.borrow().as_ref().map(|input| input.last_caret()).filter(|rect| rect.size.height > 0.0)?;
+        Some([rect.origin.x, rect.origin.y, rect.size.width, rect.size.height])
+    }
+
+    /// An item was picked: `command` is its `UICommand`, whose property list is the item's id.
+    pub(super) fn menu_picked(&self, command: &AnyObject) {
+        // SAFETY: the commands `build` makes carry an `NSString`.
+        let id: Option<Retained<NSString>> = unsafe { msg_send![command, propertyList] };
+        self.menu_step(edit_menu::Event::Picked(id.map(|id| id.to_string())));
+    }
+
+    /// The menu is going away. A tapped item's action follows shortly; with none, the runtime
+    /// hears the menu was dismissed.
+    pub(super) fn menu_dismissed(&self) {
+        self.menu_step(edit_menu::Event::Dismissed);
+    }
+
+    /// The grace after a dismissal ran out: unless a pick or another menu came first, nothing
+    /// was picked.
+    pub(super) fn menu_left(&self, attempt: Attempt) {
+        self.menu_step(edit_menu::Event::Timer(attempt));
+    }
+
+    /// Steps the menu and carries out what the step asks for. The menu's borrow ends before
+    /// the effects run: presenting has the interaction ask the view for its items and place.
+    fn menu_step(&self, event: edit_menu::Event) {
+        let ivars = self.ivars();
+        let mut seq = ivars.menu_seq.get();
+        let effects = edit_menu::step(&mut seq, &mut ivars.menu.borrow_mut(), event);
+        ivars.menu_seq.set(seq);
+        for effect in effects {
+            match effect {
+                Effect::Present { at } => self.present_menu(at),
+                Effect::Move => {
+                    let interaction = self.ivars().edit_menu.borrow().clone();
+                    if let Some(interaction) = interaction {
+                        // SAFETY: the interaction asks the view for the menu's target rect again.
+                        let _: () = unsafe { msg_send![&*interaction, updateVisibleMenuPositionAnimated: true] };
+                    }
+                }
+                Effect::Answer(picked) => {
+                    self.with_surface(|surface| surface.popup_pick(picked));
+                    self.pace(Event::Wake);
+                }
+                Effect::TimerAfter(attempt, delay) => {
+                    let view = MainOnly(Weak::new(self));
+                    after_main(delay, move || view.menu_left(attempt));
+                }
+            }
+        }
+    }
+
+    /// Presents the edit menu from `at`. The interaction asks the view for its items and its
+    /// place.
+    fn present_menu(&self, (x, y): (f32, f32)) {
         let interaction = self.ivars().edit_menu.borrow_mut().get_or_insert_with(|| {
             // SAFETY: `initWithDelegate:` is the interaction's initializer, the view conforms
             // to its delegate protocol, and a view keeps the interactions added to it.
@@ -89,78 +143,6 @@ impl RuneView {
             let configuration: Retained<AnyObject> = msg_send![class!(UIEditMenuConfiguration), configurationWithIdentifier: None::<&AnyObject>, sourcePoint: at];
             let _: () = msg_send![&*interaction, presentEditMenuWithConfiguration: &*configuration];
         }
-    }
-
-    /// The open menu as a `UIMenu`, for the interaction.
-    pub(super) fn menu_items(&self) -> Option<Retained<AnyObject>> {
-        match &*self.ivars().menu.borrow() {
-            Menu::Open { show, .. } => Some(build(&show.menu, "", 0)),
-            Menu::Closed | Menu::Leaving(_) => None,
-        }
-    }
-
-    /// What the open menu points at: the element it was asked for, else the point.
-    pub(super) fn menu_target(&self) -> CGRect {
-        let [x, y, w, h] = match &*self.ivars().menu.borrow() {
-            Menu::Open { caret: Some(rect), .. } => return *rect,
-            Menu::Open { show: Show { element: Some(rect), .. }, .. } => *rect,
-            Menu::Open { show, .. } => [show.at.0, show.at.1, 0.0, 0.0],
-            Menu::Closed | Menu::Leaving(_) => [0.0; 4],
-        };
-        CGRect::new(CGPoint::new(x as CGFloat, y as CGFloat), CGSize::new(w as CGFloat, h as CGFloat))
-    }
-
-    /// After a frame: a field's menu that is up moves with the caret.
-    pub(super) fn menu_follow_caret(&self) {
-        let moved = match &mut *self.ivars().menu.borrow_mut() {
-            Menu::Open { caret: Some(at), .. } => match self.caret().filter(|now| now != at) {
-                Some(now) => { *at = now; true }
-                None => false,
-            },
-            _ => false,
-        };
-        let interaction = self.ivars().edit_menu.borrow().clone();
-        if let (true, Some(interaction)) = (moved, interaction) {
-            // SAFETY: the interaction asks the view for the menu's target rect again.
-            let _: () = unsafe { msg_send![&*interaction, updateVisibleMenuPositionAnimated: true] };
-        }
-    }
-
-    /// The focused field's caret, where the keyboard's text input has it.
-    fn caret(&self) -> Option<CGRect> {
-        self.ivars().text.borrow().as_ref().map(|input| input.last_caret()).filter(|rect| rect.size.height > 0.0)
-    }
-
-    /// An item was picked: `command` is its `UICommand`, whose property list is the item's id.
-    pub(super) fn menu_picked(&self, command: &AnyObject) {
-        // SAFETY: the commands `build` makes carry an `NSString`.
-        let id: Option<Retained<NSString>> = unsafe { msg_send![command, propertyList] };
-        self.answer_menu(id.map(|id| id.to_string()));
-    }
-
-    /// The menu is going away. A tapped item's action follows shortly; with none, the runtime
-    /// hears the menu was dismissed.
-    pub(super) fn menu_dismissed(&self) {
-        let ivars = self.ivars();
-        if !matches!(&*ivars.menu.borrow(), Menu::Open { .. }) { return; }
-        let mut seq = ivars.menu_seq.get();
-        let attempt = seq.next();
-        ivars.menu_seq.set(seq);
-        *ivars.menu.borrow_mut() = Menu::Leaving(attempt);
-        let view = MainOnly(Weak::new(self));
-        after_main(PICK_GRACE, move || view.menu_left(attempt));
-    }
-
-    /// The grace after a dismissal ran out: unless a pick or another menu came first, nothing
-    /// was picked.
-    pub(super) fn menu_left(&self, attempt: Attempt) {
-        if matches!(&*self.ivars().menu.borrow(), Menu::Leaving(held) if *held == attempt) { self.answer_menu(None); }
-    }
-
-    fn answer_menu(&self, picked: Option<String>) {
-        if matches!(std::mem::take(&mut *self.ivars().menu.borrow_mut()), Menu::Closed) { return; }
-        self.with_surface(|surface| surface.popup_pick(picked));
-        self.pace(Event::Wake);
     }
 }
 

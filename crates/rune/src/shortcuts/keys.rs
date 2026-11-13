@@ -28,10 +28,10 @@ impl Shortcut {
     pub fn from_physical_key(key: PhysicalKeyCode, mods: crate::Mods) -> Result<Self, ShortcutError> {
         name(key).ok_or_else(|| ShortcutError::InvalidAccelerator(format!("{key:?}")))?;
         let mut bits = 0;
-        if mods.ctrl || (!cfg!(target_os = "macos") && mods.cmd) { bits |= CTRL; }
+        if mods.ctrl || (!crate::edit::MAC_KEYS && mods.cmd) { bits |= CTRL; }
         if mods.alt { bits |= ALT; }
         if mods.shift { bits |= SHIFT; }
-        if mods.logo || (cfg!(target_os = "macos") && mods.cmd) { bits |= SUPER; }
+        if mods.logo || (crate::edit::MAC_KEYS && mods.cmd) { bits |= SUPER; }
         Ok(Self { key, mods: bits })
     }
 
@@ -43,13 +43,13 @@ impl Shortcut {
     pub fn require_modifier(&self) -> Result<(), ShortcutError> {
         let function = self.key_name().strip_prefix('f').is_some_and(|n| !n.is_empty());
         if function || self.mods & (CTRL | ALT | SUPER) != 0 { return Ok(()); }
-        let names = if cfg!(target_os = "macos") { "⌘, ⌃ or ⌥" } else { "Ctrl, Alt or Super" };
+        let names = if crate::edit::MAC_KEYS { "⌘, ⌃ or ⌥" } else { "Ctrl, Alt or Super" };
         Err(ShortcutError::InvalidAccelerator(format!("{self} needs {names}")))
     }
 
     pub fn modifiers(&self) -> crate::Mods {
         crate::Mods { ctrl: self.mods & CTRL != 0, alt: self.mods & ALT != 0, shift: self.mods & SHIFT != 0,
-            logo: self.mods & SUPER != 0, cmd: self.mods & if cfg!(target_os = "macos") { SUPER } else { CTRL } != 0 }
+            logo: self.mods & SUPER != 0, cmd: self.mods & if crate::edit::MAC_KEYS { SUPER } else { CTRL } != 0 }
     }
 
     pub(super) fn key_name(&self) -> &'static str { name(self.key).expect("validated physical shortcut key") }
@@ -58,7 +58,7 @@ impl Shortcut {
     /// digit keys only.
     pub(crate) fn matches_key(&self, ev: &crate::KeyEvent) -> bool {
         let (want, m) = (self.modifiers(), ev.mods);
-        let logo = cfg!(target_os = "macos") || want.logo == m.logo;
+        let logo = crate::edit::MAC_KEYS || want.logo == m.logo;
         if want.shift != m.shift || want.alt != m.alt || want.cmd != m.cmd || want.ctrl != m.ctrl || !logo { return false; }
         let name = self.key_name();
         match &ev.key {
@@ -104,7 +104,7 @@ impl Shortcut {
 
 /// Keycaps for a chord being held, before a non-modifier key has been pressed.
 pub fn modifier_keycaps(mods: crate::Mods) -> Vec<String> {
-    let mac = cfg!(target_os = "macos");
+    let mac = crate::edit::MAC_KEYS;
     let mut labels = Vec::new();
     for (held, label) in [(mods.ctrl || (!mac && mods.cmd), if mac { "⌃" } else { "Ctrl" }),
         (mods.alt, if mac { "⌥" } else { "Alt" }), (mods.shift, if mac { "⇧" } else { "Shift" }),
@@ -115,7 +115,7 @@ pub fn modifier_keycaps(mods: crate::Mods) -> Vec<String> {
 }
 
 fn named_label(name: &str) -> Option<String> {
-    let mac = cfg!(target_os = "macos");
+    let mac = crate::edit::MAC_KEYS;
     Some(match name {
         "escape" => if mac { "⎋" } else { "Esc" }, "enter" => if mac { "↩" } else { "Return" },
         "space" => "Space", "tab" => if mac { "⇥" } else { "Tab" }, "backspace" => if mac { "⌫" } else { "Backspace" },
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(key("ctrl+space"), "Space");
         assert_eq!(key("ctrl+f5"), "F5");
         assert_eq!(key("ctrl+left"), "←");
-        assert_eq!(key("ctrl+enter"), if cfg!(target_os = "macos") { "↩" } else { "Return" });
+        assert_eq!(key("ctrl+enter"), if crate::edit::MAC_KEYS { "↩" } else { "Return" });
         assert_eq!(capital("k".into()), "K");
         assert_eq!(capital("ß".into()), "ß");
         assert_eq!(capital("ı".into()), "ı");

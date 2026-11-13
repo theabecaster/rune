@@ -1,0 +1,1 @@
+- **iOS: `Shortcut` follows the Mac's keys.** A shortcut's ⌘ is the logo key on iOS as on macOS, so `"cmd+k"` matches ⌘K from an iPad's or iPhone's hardware keyboard, and keycaps read ⌘ ⇧ ⌥ ⌃ and ↩ ⎋ ⌫.

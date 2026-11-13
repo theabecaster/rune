@@ -125,6 +125,8 @@ impl RuneView {
             let _: () = msg_send![&*centre, removeObserver: self];
             let window: Option<Retained<AnyObject>> = msg_send![self, window];
             let Some(window) = window else {
+                // A view out of its window hears no key-up.
+                self.keys(keys::Event::Reset);
                 self.pace(Event::Detached);
                 return;
             };

@@ -195,7 +195,8 @@ pub(crate) enum Event {
     Down { usage: isize, stroke: Stroke },
     /// A key went up, or the system cancelled its press.
     Up { usage: isize, stroke: Stroke },
-    /// Every key is up as far as the view knows: the app went to the background.
+    /// Every key is up as far as the view knows: the app went to the background, or the view
+    /// left its window.
     Reset,
     Timer(Attempt),
 }

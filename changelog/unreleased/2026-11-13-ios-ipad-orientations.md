@@ -1,0 +1,1 @@
+- **iOS: an iPad app from `scripts/ios-app` turns every way.** The bundle's `UISupportedInterfaceOrientations~ipad` lists all four orientations, upside-down portrait included, which iPadOS requires before it lets an app share the screen in Split View or a Stage Manager window. iPhones keep the three they had.

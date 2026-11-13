@@ -30,6 +30,11 @@ def info(args):
         UISupportedInterfaceOrientations=[
             "UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft",
             "UIInterfaceOrientationLandscapeRight"],
+        # An iPad app that turns every way can share the screen (Split View, Stage Manager's
+        # windows); one that leaves an orientation out runs full screen only.
+        **{"UISupportedInterfaceOrientations~ipad": [
+            "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+            "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]},
     )
 
 

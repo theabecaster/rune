@@ -32,6 +32,7 @@ class BundleRegression(unittest.TestCase):
             self.assertEqual(plist["UILaunchScreen"], {})
             self.assertIs(plist["CADisableMinimumFrameDurationOnPhone"], True)
             self.assertIn("UIApplicationSceneManifest", plist)
+            self.assertEqual(len(plist["UISupportedInterfaceOrientations~ipad"]), 4, "an iPad app turns every way, so it can share the screen")
             self.assertEqual(command.call_args.args[:4], ("codesign", "--force", "--sign", "-"))
 
     def test_staging_again_replaces_the_old_bundle(self):

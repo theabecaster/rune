@@ -144,3 +144,5 @@ that doesn't reach the screen's edges reads zero. `examples/web-hello` exports
 - `UILaunchScreen` (an empty dictionary will do), or iOS letterboxes the app.
 - `CADisableMinimumFrameDurationOnPhone` set to true, or an iPhone holds the app at 60 Hz.
 - `MinimumOSVersion` 16.0 or later.
+- `UISupportedInterfaceOrientations~ipad` with all four orientations, or an iPad runs the app
+  full screen only, never in Split View or a Stage Manager window.

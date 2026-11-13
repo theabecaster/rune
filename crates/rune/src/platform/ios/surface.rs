@@ -16,6 +16,8 @@ use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
 use std::path::PathBuf;
 use crate::edit::ImeText;
+use crate::PhysicalInput;
+use super::keys::Stroke;
 use accesskit::{ActionRequest, TreeUpdate};
 use crate::time::Instant;
 
@@ -58,8 +60,10 @@ pub(crate) trait Surface {
     fn file_dialog(&mut self) -> Option<(u64, FileDialogKind, FileDialogOptions)>;
     /// The dialog's answer: the chosen file, none when cancelled, or why it could not show.
     fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>);
-    /// A key from the soft keyboard or a hardware one.
+    /// A key from the soft keyboard, or an edit action UIKit sent.
     fn key(&mut self, key: KeyEvent);
+    /// A hardware key going down (`pressed`, held when `repeat`) or up.
+    fn stroke(&mut self, stroke: Stroke, pressed: bool, repeat: bool);
     /// A composition, a commit or a selection from the keyboard.
     fn ime(&mut self, ime: Ime);
     /// What the focused field tells the keyboard, as of the last frame.
@@ -259,6 +263,18 @@ impl<S: 'static> Surface for Hosted<S> {
     }
 
     fn key(&mut self, key: KeyEvent) { self.host.key(key); }
+
+    fn stroke(&mut self, stroke: Stroke, pressed: bool, repeat: bool) {
+        let rt = self.host.runtime_mut();
+        let Stroke { code, mods, key, base } = stroke;
+        match code {
+            // The physical key first, with the logical one for when no handler takes it. A
+            // release carries its logical key too, for `on_key_up`.
+            Some(code) => { rt.physical_then(PhysicalInput::Key { key: code, mods, pressed, repeat }, key, base, None); }
+            // A key with no physical code still edits and moves.
+            None => if let Some(key) = key.filter(|_| pressed) { self.host.key(key) },
+        }
+    }
 
     fn ime(&mut self, ime: Ime) { self.host.runtime_mut().ime(ime); }
 

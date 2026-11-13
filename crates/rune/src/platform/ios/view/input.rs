@@ -162,8 +162,9 @@ impl RuneView {
         self.ivars().text.borrow().as_ref().is_some_and(|text| unsafe { msg_send![&**text, isFirstResponder] })
     }
 
-    /// Hardware keys going down or up, for this view or (`typing`) for its text input. True
-    /// when the runtime took every one of them; otherwise they are UIKit's.
+    /// Hardware keys going down or up, for this view or (`typing`) for its text input. Each
+    /// reaches the runtime as a physical key; true when the runtime also takes every one as a
+    /// logical key, and otherwise UIKit types them.
     pub(crate) fn presses(&self, presses: &AnyObject, down: bool, typing: bool) -> bool {
         // Presses the text input left to UIKit come up the responder chain to this view, its
         // superview: they are still UIKit's.
@@ -188,14 +189,12 @@ impl RuneView {
                 });
             }
         }
-        if !down {
-            for press in &read { self.keys(keys::Event::Up { usage: press.usage }); }
-            return true;
+        let strokes: Vec<_> = read.iter().filter_map(|press| keys::stroke(press, typing).map(|stroke| (press.usage, stroke))).collect();
+        let taken = strokes.len() == read.len() && strokes.iter().all(|(_, stroke)| stroke.key.is_some());
+        for (usage, stroke) in strokes {
+            self.keys(if down { keys::Event::Down { usage, stroke } } else { keys::Event::Up { usage, stroke } });
         }
-        let events: Option<Vec<_>> = read.iter().map(|press| keys::event(press, typing).map(|event| (press.usage, event))).collect();
-        let Some(events) = events else { return false };
-        for (usage, event) in events { self.keys(keys::Event::Down { usage, event }); }
-        true
+        !down || taken
     }
 
     /// The shortcut Command plus `c`, for an edit action UIKit sent (copy, cut, paste, select all).
@@ -214,7 +213,8 @@ impl RuneView {
         let mut sent = false;
         for effect in effects {
             match effect {
-                keys::Effect::Send(key) => sent |= self.with_surface(|surface| surface.key(key)).is_some(),
+                keys::Effect::Down { stroke, repeat } => sent |= self.with_surface(|surface| surface.stroke(stroke, true, repeat)).is_some(),
+                keys::Effect::Up(stroke) => sent |= self.with_surface(|surface| surface.stroke(stroke, false, false)).is_some(),
                 keys::Effect::TimerAfter(attempt, seconds) => {
                     let view = MainOnly(Weak::new(self));
                     after_main(seconds, move || view.keys(keys::Event::Timer(attempt)));

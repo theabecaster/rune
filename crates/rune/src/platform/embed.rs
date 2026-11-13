@@ -182,6 +182,15 @@ impl<S: 'static> LayerHost<S> {
         self
     }
 
+    /// Links a handler opens with [`Tx::open_url`](crate::Tx::open_url) open in the system, as
+    /// from an app's own window, once the handler's frame is done. Without this nothing opens:
+    /// the host takes the checked links with [`Runtime::take_url_requests`] and opens them
+    /// itself.
+    pub fn with_system_links(mut self) -> Self {
+        self.rt.open_urls_natively = true;
+        self
+    }
+
     /// A key from the host's keyboard. With [`LayerHost::with_system_clipboard`], the paste
     /// shortcut over something that takes a paste reads the system clipboard, as in an app's
     /// own window; every other key is [`Runtime::key`].
@@ -404,5 +413,26 @@ mod tests {
         let target = crate::time::Instant::now() + std::time::Duration::from_millis(8);
         assert!(host.frame_at(target).drew);
         assert_eq!(host.clock.last(), target);
+    }
+
+    #[test]
+    fn links_open_in_the_system_only_when_the_host_asks() {
+        let layer: Retained<AnyObject> = unsafe { msg_send![AnyClass::get(c"CAMetalLayer").expect("QuartzCore"), new] };
+        let view = |_: &(), _: &mut Cx<()>| -> El { col().size(120.0, 80.0) };
+        let spec = AppSpec::new("embed-links", (120.0, 80.0), || (), view);
+        let host = unsafe {
+            LayerHost::from_core_animation_layer(
+                Retained::as_ptr(&layer) as *mut std::ffi::c_void,
+                &spec,
+                (),
+                (120.0, 80.0),
+                2.0,
+                true,
+                Arc::new(|| {}),
+            )
+        };
+        let Ok(host) = host else { return };
+        assert!(!host.runtime().open_urls_natively);
+        assert!(host.with_system_links().runtime().open_urls_natively);
     }
 }

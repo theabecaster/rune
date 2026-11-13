@@ -2,25 +2,24 @@
 //! app's state type erased so one Objective-C class serves every app.
 
 use std::ffi::c_void;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use crate::app::{App, Shared};
-use crate::embed::{EmbedFrame, LayerHost};
-use crate::runtime::{TouchPhase, Waker};
-use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, RotateEvent};
+use accesskit::{ActionRequest, TreeUpdate};
+
+use super::field_touch;
+use super::keys::Stroke;
 use super::text::doc::Snapshot;
 use super::text::geometry::Geometry;
 use crate::a11y::AccessibilityLink;
-use crate::app::OnWindow;
+use crate::app::{App, OnWindow, Shared};
+use crate::embed::{EmbedFrame, LayerHost};
 use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use crate::PhysicalInput;
-use super::field_touch;
-use super::keys::Stroke;
-use accesskit::{ActionRequest, TreeUpdate};
+use crate::runtime::{TouchPhase, Waker};
 use crate::time::Instant;
+use crate::{GesturePhase, Ime, KeyEvent, MagnifyEvent, PhysicalInput, RotateEvent};
 
 /// What the focused field tells the keyboard after a frame.
 pub(crate) struct TextState {
@@ -34,10 +33,13 @@ pub(crate) struct TextState {
 }
 
 pub(crate) trait Surface {
+    // Size and frames.
     /// The view's size in points and its display scale.
     fn resize(&mut self, size: (f32, f32), scale: f32);
     /// Steps the app to `target`, when the frame will be on screen, and presents it.
     fn frame(&mut self, target: Instant) -> EmbedFrame;
+
+    // Touch and pointer.
     /// One finger's event at (x, y) in the view's points, `time` in seconds since boot.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64);
     /// The pointer of a mouse or trackpad is at this point of the view, or left it.
@@ -45,6 +47,8 @@ pub(crate) trait Surface {
     /// A wheel or a trackpad scrolled the content under `at` by `moved` points; `velocity` is
     /// its speed in points a second when the scroll ends.
     fn scroll(&mut self, phase: GesturePhase, at: (f32, f32), moved: (f32, f32), velocity: (f32, f32));
+
+    // Gestures.
     /// Two fingers pinched: scale by `1.0 + delta` about (x, y) in the view's points.
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase);
     /// Two fingers turned `degrees`, positive counterclockwise, about (x, y).
@@ -53,6 +57,8 @@ pub(crate) trait Surface {
     fn takes_secondary(&self, x: f32, y: f32) -> bool;
     /// A secondary press at (x, y): a long press.
     fn secondary(&mut self, x: f32, y: f32);
+
+    // Menus and dialogs.
     /// The next pop-up menu to show, once the frame that asked for it is done.
     fn popup(&mut self) -> Option<(Show, bool)>;
     /// The menu showing was answered with an item's id, or dismissed.
@@ -61,6 +67,8 @@ pub(crate) trait Surface {
     fn file_dialog(&mut self) -> Option<(u64, FileDialogKind, FileDialogOptions)>;
     /// The dialog's answer: the chosen file, none when cancelled, or why it could not show.
     fn file_dialog_answer(&mut self, id: u64, answer: Result<Option<PathBuf>, String>);
+
+    // Keys and text.
     /// A key from the soft keyboard, or an edit action UIKit sent.
     fn key(&mut self, key: KeyEvent);
     /// A hardware key going down (`pressed`, held when `repeat`) or up.
@@ -71,6 +79,8 @@ pub(crate) trait Surface {
     fn text(&self) -> TextState;
     /// Where the focused field's characters are, as last drawn.
     fn text_geometry(&self) -> Option<Geometry>;
+
+    // Accessibility.
     /// An assistive client asked for the view's elements: the runtime builds its tree.
     fn accessibility_wanted(&mut self);
     /// What a client did to an element, for the next frame.
@@ -78,6 +88,8 @@ pub(crate) trait Surface {
     /// The accessibility tree's changes since the last frame, while a client listens, and the
     /// view's zoom: the tree is in the app's points, which the zoom scales to the view's.
     fn accessibility(&mut self) -> Option<(TreeUpdate, f32)>;
+
+    // System settings.
     /// Whether the app is in front, for `AppHandle::is_visible`.
     fn set_visible(&mut self, visible: bool);
     /// The system's appearance.
@@ -120,6 +132,7 @@ impl<S: 'static> Hosted<S> {
 }
 
 impl<S: 'static> Surface for Hosted<S> {
+    // Size and frames.
     fn resize(&mut self, size: (f32, f32), scale: f32) { self.host.resize(size, scale); }
 
     fn frame(&mut self, target: Instant) -> EmbedFrame {
@@ -140,15 +153,7 @@ impl<S: 'static> Surface for Hosted<S> {
         frame
     }
 
-    fn accessibility_wanted(&mut self) { self.accessibility.activate(); }
-
-    fn accessibility_act(&mut self, request: ActionRequest) { self.accessibility.act(request); }
-
-    fn accessibility(&mut self) -> Option<(TreeUpdate, f32)> {
-        let zoom = self.host.runtime().zoom();
-        self.accessibility.update(self.host.runtime_mut()).map(|update| (update, zoom))
-    }
-
+    // Touch and pointer.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
         let (vx, vy) = self.in_view(x, y);
         let rt = self.host.runtime();
@@ -190,6 +195,7 @@ impl<S: 'static> Surface for Hosted<S> {
         }
     }
 
+    // Gestures.
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase) {
         let (x, y) = self.in_view(x, y);
         self.host.runtime_mut().magnify_event(MagnifyEvent::new(delta).at(x, y).phase(phase));
@@ -218,6 +224,7 @@ impl<S: 'static> Surface for Hosted<S> {
         rt.secondary_up(x, y);
     }
 
+    // Menus and dialogs.
     fn popup(&mut self) -> Option<(Show, bool)> {
         let rt = self.host.runtime_mut();
         if rt.popup_waits_for_layout() { return None; }
@@ -245,6 +252,7 @@ impl<S: 'static> Surface for Hosted<S> {
         self.host.runtime_mut().answer_file_dialog(id, answer.map_err(FileDialogError));
     }
 
+    // Keys and text.
     fn key(&mut self, key: KeyEvent) { self.host.key(key); }
 
     fn stroke(&mut self, stroke: Stroke, pressed: bool, repeat: bool) {
@@ -281,6 +289,17 @@ impl<S: 'static> Surface for Hosted<S> {
         self.host.runtime().focused_field_lines().map(|lines| Geometry::new(&lines))
     }
 
+    // Accessibility.
+    fn accessibility_wanted(&mut self) { self.accessibility.activate(); }
+
+    fn accessibility_act(&mut self, request: ActionRequest) { self.accessibility.act(request); }
+
+    fn accessibility(&mut self) -> Option<(TreeUpdate, f32)> {
+        let zoom = self.host.runtime().zoom();
+        self.accessibility.update(self.host.runtime_mut()).map(|update| (update, zoom))
+    }
+
+    // System settings.
     fn set_visible(&mut self, visible: bool) { self.shared.visible.store(visible, Ordering::Release); }
 
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }

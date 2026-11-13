@@ -2,7 +2,7 @@
 //! recognizers, a hardware keyboard's presses and their repeat, and the edits the keyboard's
 //! text input makes. Each goes to the runtime through the view's surface and wakes its pacing.
 
-use objc2_core_foundation::CGPoint;
+use objc2_core_foundation::{CGFloat, CGPoint};
 use objc2_foundation_video::NSString;
 use objc2_video::rc::{Allocated, Retained, Weak};
 use objc2_video::runtime::{AnyClass, AnyObject, Sel};
@@ -78,6 +78,35 @@ impl RuneView {
             (moved, msg_send![recognizer, velocityInView: self])
         };
         self.with_surface(|surface| surface.scroll(phase, (x, y), (moved.x as f32, moved.y as f32), (velocity.x as f32, velocity.y as f32)));
+        self.track(phase);
+    }
+
+    /// Two fingers pinched: the surface hears how much the pinch grew since the last callback.
+    pub(super) fn pinched(&self, recognizer: &AnyObject) {
+        let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+        // SAFETY: a pinch recognizer's `scale` is a `CGFloat`. Setting it back to 1 makes
+        // the next callback's scale the change since this one.
+        let scale: CGFloat = unsafe {
+            let scale = msg_send![recognizer, scale];
+            let _: () = msg_send![recognizer, setScale: 1.0 as CGFloat];
+            scale
+        };
+        self.with_surface(|surface| surface.magnify(scale as f32 - 1.0, x, y, phase));
+        self.track(phase);
+    }
+
+    /// Two fingers turned: the surface hears the turn since the last callback.
+    pub(super) fn rotated(&self, recognizer: &AnyObject) {
+        let Some((phase, x, y)) = self.gesture(recognizer) else { return };
+        // SAFETY: a rotation recognizer's `rotation` is a `CGFloat` in radians. Setting it
+        // back to 0 makes the next callback's rotation the turn since this one.
+        let radians: CGFloat = unsafe {
+            let radians = msg_send![recognizer, rotation];
+            let _: () = msg_send![recognizer, setRotation: 0.0 as CGFloat];
+            radians
+        };
+        // UIKit's angle grows clockwise; a `RotateEvent`'s counterclockwise.
+        self.with_surface(|surface| surface.rotate(-(radians as f32).to_degrees(), x, y, phase));
         self.track(phase);
     }
 
@@ -252,4 +281,5 @@ impl RuneView {
             }
         }
         self.pace(Event::Wake);
-    }}
+    }
+}

@@ -49,6 +49,16 @@ fn an_item_without_a_shortcut_takes_no_chord() {
 }
 
 #[test]
+fn a_separator_given_a_shortcut_leaves_its_chord_to_the_next_item() {
+    let line = || d(MenuItem::<()>::separator().key_equivalent(shortcut("cmd+k")).keys_first());
+    assert_eq!(found(&[line()], "cmd+k", true), None);
+    assert_eq!(found(&[line()], "cmd+k", false), None);
+    let items = [line(), d(item("panel", "cmd+k").keys_first())];
+    assert_eq!(found(&items, "cmd+k", true), Some("panel"));
+    assert_eq!(found(&items, "cmd+k", false), Some("panel"));
+}
+
+#[test]
 fn the_first_of_two_items_with_a_chord_takes_it() {
     let items = [d(item("first", "cmd+k")), d(item("second", "cmd+k"))];
     assert_eq!(found(&items, "cmd+k", false), Some("first"));

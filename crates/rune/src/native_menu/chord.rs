@@ -7,9 +7,10 @@ use super::Description;
 use crate::KeyEvent;
 
 /// The first enabled item with `key` as its shortcut that UIKit doesn't run for it: a
-/// `keys_first` item, or any item where there is no `menu_bar`.
+/// `keys_first` item, or any item where there is no `menu_bar`. Never a separator, which
+/// has nothing to run.
 pub(crate) fn chord_item<'a>(items: &'a [Description], key: &KeyEvent, menu_bar: bool) -> Option<&'a Description> {
-    items.iter().find(|d| (d.keys_first || !menu_bar) && d.enabled
+    items.iter().find(|d| !d.separator && (d.keys_first || !menu_bar) && d.enabled
         && d.equivalent.as_ref().is_some_and(|s| s.matches_key(key)))
 }
 

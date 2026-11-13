@@ -13,6 +13,8 @@ mod macos;
 #[cfg(target_os = "macos")]
 mod default_macos;
 #[cfg(any(test, target_os = "ios"))]
+mod chord;
+#[cfg(any(test, target_os = "ios"))]
 mod groups;
 #[cfg(target_os = "ios")]
 mod ios;

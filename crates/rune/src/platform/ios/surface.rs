@@ -324,11 +324,9 @@ impl<S: 'static> Surface for Hosted<S> {
 pub(crate) type Mount = Box<dyn FnOnce(*mut c_void, (f32, f32), f32, bool, Waker) -> Result<Box<dyn Surface>, String>>;
 
 impl<S: 'static> Hosted<S> {
-    /// A point of the `UIView`, the window's points, in the app's own: a view that zooms
-    /// (`Cx::zoom`) lays out in points the zoom scales, as a desktop window's does.
+    /// A point of the `UIView` in the app's own points (`zoom`).
     fn in_view(&self, x: f32, y: f32) -> (f32, f32) {
-        let zoom = self.host.runtime().zoom();
-        (x / zoom, y / zoom)
+        super::zoom::from_window(self.host.runtime().zoom(), x, y)
     }
 }
 

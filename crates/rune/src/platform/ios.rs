@@ -13,6 +13,7 @@ mod surface;
 pub(crate) mod text;
 #[cfg(target_os = "ios")]
 mod view;
+pub(crate) mod zoom;
 
 #[cfg(target_os = "ios")]
 pub(crate) use app::run;

@@ -19,6 +19,7 @@ use objc2_video::rc::Retained;
 use objc2_video::runtime::AnyObject;
 use objc2_video::{class, msg_send, sel};
 
+use super::chord::chord_item;
 use super::groups::{Group, groups};
 use super::key_equivalent::uikit_input;
 use super::{Description, Sink};
@@ -79,8 +80,7 @@ pub(crate) fn keys_first(key: &crate::KeyEvent) -> Option<Unhandled> {
     INSTALLED.with(|installed| {
         let installed = installed.borrow();
         let installed = installed.as_ref()?;
-        let item = installed.items.iter().find(|d| (d.keys_first || !menu_bar) && d.enabled
-            && d.equivalent.as_ref().is_some_and(|s| s.matches_key(key)))?;
+        let item = chord_item(&installed.items, key, menu_bar)?;
         let (id, sink) = (item.id.clone(), installed.sink.clone());
         Some(Unhandled::Menu(std::sync::Arc::new(move || sink(&id))))
     })

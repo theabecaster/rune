@@ -148,7 +148,7 @@ impl RuneElement {
     /// Says what `element` says now. `zoom` scales its rect to the view's points.
     fn describe(&self, element: &Element, zoom: f32) {
         let text = |s: Option<&str>| s.map(NSString::from_str);
-        let [x, y, w, h] = element.rect.map(|v| (v * zoom) as CGFloat);
+        let [x, y, w, h] = super::zoom::to_window(zoom, element.rect).map(|v| v as CGFloat);
         // SAFETY: `UIAccessibilityElement`'s properties, of these types.
         unsafe {
             let _: () = msg_send![self, setAccessibilityLabel: &*NSString::from_str(&element.label)];

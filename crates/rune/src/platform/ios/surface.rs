@@ -51,7 +51,7 @@ pub(crate) trait Surface {
     /// A secondary press at (x, y): a long press.
     fn secondary(&mut self, x: f32, y: f32);
     /// The next pop-up menu to show, once the frame that asked for it is done.
-    fn popup(&mut self) -> Option<Show>;
+    fn popup(&mut self) -> Option<(Show, bool)>;
     /// The menu showing was answered with an item's id, or dismissed.
     fn popup_pick(&mut self, picked: Option<String>);
     /// The file dialog to show, once the frame that asked for it is done.
@@ -70,8 +70,9 @@ pub(crate) trait Surface {
     fn accessibility_wanted(&mut self);
     /// What a client did to an element, for the next frame.
     fn accessibility_act(&mut self, request: ActionRequest);
-    /// The accessibility tree's changes since the last frame, while a client listens.
-    fn accessibility(&mut self) -> Option<TreeUpdate>;
+    /// The accessibility tree's changes since the last frame, while a client listens, and the
+    /// view's zoom: the tree is in the app's points, which the zoom scales to the view's.
+    fn accessibility(&mut self) -> Option<(TreeUpdate, f32)>;
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
     /// The Reduce Motion setting.
@@ -145,13 +146,17 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn accessibility_act(&mut self, request: ActionRequest) { self.accessibility.act(request); }
 
-    fn accessibility(&mut self) -> Option<TreeUpdate> { self.accessibility.update(self.host.runtime_mut()) }
+    fn accessibility(&mut self) -> Option<(TreeUpdate, f32)> {
+        let zoom = self.host.runtime().zoom();
+        self.accessibility.update(self.host.runtime_mut()).map(|update| (update, zoom))
+    }
 
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32, time: f64) {
+        let (vx, vy) = self.in_view(x, y);
         let rt = self.host.runtime_mut();
         if phase == TouchPhase::Started && !rt.touching() {
             self.selected = rt.ime_text().filter(|text| !text.selection.is_empty());
-            self.tap = match rt.ime_text().filter(|text| text.selection.is_empty() && rt.on_focused_field(x, y)) {
+            self.tap = match rt.ime_text().filter(|text| text.selection.is_empty() && rt.on_focused_field(vx, vy)) {
                 Some(before) => Tap::Down { at: (x, y), before },
                 None => Tap::None,
             };
@@ -162,10 +167,11 @@ impl<S: 'static> Surface for Hosted<S> {
             (Tap::Down { at, before }, TouchPhase::Started) => Tap::Down { at, before },
             _ => Tap::None,
         };
-        rt.touch(id, phase, x, y, time);
+        rt.touch(id, phase, vx, vy, time);
     }
 
     fn hover(&mut self, at: Option<(f32, f32)>) {
+        let at = at.map(|(x, y)| self.in_view(x, y));
         let rt = self.host.runtime_mut();
         // A finger's touch is the pointer while it is down.
         if rt.touching() { return; }
@@ -176,6 +182,9 @@ impl<S: 'static> Surface for Hosted<S> {
     }
 
     fn scroll(&mut self, phase: GesturePhase, (x, y): (f32, f32), (dx, dy): (f32, f32), (vx, vy): (f32, f32)) {
+        // A scroll moves the content as far on screen at any zoom, as a desktop wheel does.
+        let (x, y) = self.in_view(x, y);
+        let ((dx, dy), (vx, vy)) = (self.in_view(dx, dy), self.in_view(vx, vy));
         let rt = self.host.runtime_mut();
         match phase {
             GesturePhase::Began => { rt.wheel_began(); rt.wheel_xy(x, y, dx, dy); }
@@ -190,16 +199,22 @@ impl<S: 'static> Surface for Hosted<S> {
     }
 
     fn magnify(&mut self, delta: f32, x: f32, y: f32, phase: GesturePhase) {
+        let (x, y) = self.in_view(x, y);
         self.host.runtime_mut().magnify_event(MagnifyEvent::new(delta).at(x, y).phase(phase));
     }
 
     fn rotate(&mut self, degrees: f32, x: f32, y: f32, phase: GesturePhase) {
+        let (x, y) = self.in_view(x, y);
         self.host.runtime_mut().rotate_event(RotateEvent::new(degrees).at(x, y).phase(phase));
     }
 
-    fn takes_secondary(&self, x: f32, y: f32) -> bool { self.host.runtime().takes_secondary(x, y) }
+    fn takes_secondary(&self, x: f32, y: f32) -> bool {
+        let (x, y) = self.in_view(x, y);
+        self.host.runtime().takes_secondary(x, y)
+    }
 
     fn secondary(&mut self, x: f32, y: f32) {
+        let (x, y) = self.in_view(x, y);
         let rt = self.host.runtime_mut();
         // A finger that lands in a field places the caret at once, as a mouse press does, so a
         // long press on selected text would find nothing selected. The selection the finger
@@ -214,14 +229,14 @@ impl<S: 'static> Surface for Hosted<S> {
         rt.secondary_up(x, y);
     }
 
-    fn popup(&mut self) -> Option<Show> {
+    fn popup(&mut self) -> Option<(Show, bool)> {
         let rt = self.host.runtime_mut();
         if rt.popup_waits_for_layout() { return None; }
         let field = rt.popup_is_field_menu();
         match rt.take_popup()? {
             Some(show) => {
                 self.field_menu = field.then_some(show.at);
-                Some(show)
+                Some((show, field))
             }
             // It can't open: its anchor is gone.
             None => { let _ = rt.resolve_popup(None); None }
@@ -275,6 +290,15 @@ impl<S: 'static> Surface for Hosted<S> {
 /// Starts an app on a `CAMetalLayer`, once its view has a size: the layer, the view's size in
 /// points, its scale, whether the system is dark, and the waker other threads call.
 pub(crate) type Mount = Box<dyn FnOnce(*mut c_void, (f32, f32), f32, bool, Waker) -> Result<Box<dyn Surface>, String>>;
+
+impl<S: 'static> Hosted<S> {
+    /// A point of the `UIView`, the window's points, in the app's own: a view that zooms
+    /// (`Cx::zoom`) lays out in points the zoom scales, as a desktop window's does.
+    fn in_view(&self, x: f32, y: f32) -> (f32, f32) {
+        let zoom = self.host.runtime().zoom();
+        (x / zoom, y / zoom)
+    }
+}
 
 pub(crate) fn mount<S: 'static>(mut app: App<S>) -> Mount {
     let on_ready = app.on_ready.take();

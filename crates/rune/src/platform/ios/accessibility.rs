@@ -145,10 +145,10 @@ impl RuneElement {
         ivars.host.load().is_some_and(|host| host.accessibility_gesture(ivars.id.get(), gesture))
     }
 
-    /// Says what `element` says now.
-    fn describe(&self, element: &Element) {
+    /// Says what `element` says now. `zoom` scales its rect to the view's points.
+    fn describe(&self, element: &Element, zoom: f32) {
         let text = |s: Option<&str>| s.map(NSString::from_str);
-        let [x, y, w, h] = element.rect.map(|v| v as CGFloat);
+        let [x, y, w, h] = element.rect.map(|v| (v * zoom) as CGFloat);
         // SAFETY: `UIAccessibilityElement`'s properties, of these types.
         unsafe {
             let _: () = msg_send![self, setAccessibilityLabel: &*NSString::from_str(&element.label)];
@@ -198,7 +198,8 @@ impl Accessibility {
     /// Takes the tree's changes: elements are made, described again or dropped, and the
     /// reader is told what moved and what was said. Returns what to post once the view's own
     /// state is no longer borrowed.
-    pub(crate) fn apply(&mut self, mtm: MainThreadMarker, host: &RuneView, update: TreeUpdate) -> Posts {
+    /// `zoom` scales the tree's points to the view's.
+    pub(crate) fn apply(&mut self, mtm: MainThreadMarker, host: &RuneView, update: TreeUpdate, zoom: f32) -> Posts {
         let first = self.mirror.elements().is_empty();
         let changes = self.mirror.apply(update);
         let mut made = HashMap::default();
@@ -206,7 +207,7 @@ impl Accessibility {
         let list: Retained<AnyObject> = unsafe { msg_send![class!(NSMutableArray), array] };
         for element in self.mirror.elements() {
             let object = self.made.remove(&element.id).unwrap_or_else(|| RuneElement::new(mtm, host, element.id));
-            object.describe(element);
+            object.describe(element, zoom);
             // SAFETY: as above.
             let _: () = unsafe { msg_send![&*list, addObject: &*object] };
             made.insert(element.id, object);

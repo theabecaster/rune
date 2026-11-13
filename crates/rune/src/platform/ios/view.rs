@@ -605,10 +605,13 @@ impl RuneView {
         // The frame applied the input before it: the keyboard hears what the field holds now.
         let input = self.ivars().text.borrow().clone();
         if let Some(input) = input { input.sync(text.wanted, text.snapshot, text.caret, text.secure); }
-        if let Some(popup) = popup { self.open_menu(popup); }
+        match popup {
+            Some((popup, field)) => self.open_menu(popup, field),
+            None => self.menu_follow_caret(),
+        }
         if let Some((id, kind, options)) = file { self.pick_file(id, kind, &options); }
-        if let Some(tree) = tree {
-            let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree);
+        if let Some((tree, zoom)) = tree {
+            let posts = self.ivars().accessibility.borrow_mut().apply(self.mtm(), self, tree, zoom);
             posts.post();
         }
         self.pace(Event::Frame { animating: frame.animating, wake_after: frame.wake_after_secs });

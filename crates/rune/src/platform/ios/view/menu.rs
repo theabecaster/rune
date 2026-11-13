@@ -35,8 +35,10 @@ const PICK_GRACE: f64 = 0.25;
 pub(super) enum Menu {
     #[default]
     Closed,
-    /// Up, or on its way up.
-    Open(Show),
+    /// Up, or on its way up. A text field's menu points at its caret, as UIKit's fields do,
+    /// and follows it: `caret` is where it pointed last. Focusing the field brings up the
+    /// keyboard, which can move the field away from where it was pressed.
+    Open { show: Show, caret: Option<CGRect> },
     /// Going away: a pick may still arrive, and if none has when this attempt's timer fires,
     /// the menu was dismissed.
     Leaving(Attempt),
@@ -61,10 +63,15 @@ impl RuneView {
         self.pace(Event::Wake);
     }
 
-    /// Puts `show`'s menu up. The interaction asks the view for its items and its place.
-    pub(super) fn open_menu(&self, show: Show) {
-        let (x, y) = show.at;
-        *self.ivars().menu.borrow_mut() = Menu::Open(show);
+    /// Puts `show`'s menu up, at the focused field's caret when it is the field's own menu.
+    /// The interaction asks the view for its items and its place.
+    pub(super) fn open_menu(&self, show: Show, field: bool) {
+        let caret = field.then(|| self.caret()).flatten();
+        let (x, y) = match caret {
+            Some(rect) => (rect.origin.x as f32 + rect.size.width as f32 / 2.0, rect.origin.y as f32 + rect.size.height as f32 / 2.0),
+            None => show.at,
+        };
+        *self.ivars().menu.borrow_mut() = Menu::Open { show, caret };
         let interaction = self.ivars().edit_menu.borrow_mut().get_or_insert_with(|| {
             // SAFETY: `initWithDelegate:` is the interaction's initializer, the view conforms
             // to its delegate protocol, and a view keeps the interactions added to it.
@@ -87,7 +94,7 @@ impl RuneView {
     /// The open menu as a `UIMenu`, for the interaction.
     pub(super) fn menu_items(&self) -> Option<Retained<AnyObject>> {
         match &*self.ivars().menu.borrow() {
-            Menu::Open(show) => Some(build(&show.menu, "", 0)),
+            Menu::Open { show, .. } => Some(build(&show.menu, "", 0)),
             Menu::Closed | Menu::Leaving(_) => None,
         }
     }
@@ -95,11 +102,33 @@ impl RuneView {
     /// What the open menu points at: the element it was asked for, else the point.
     pub(super) fn menu_target(&self) -> CGRect {
         let [x, y, w, h] = match &*self.ivars().menu.borrow() {
-            Menu::Open(Show { element: Some(rect), .. }) => *rect,
-            Menu::Open(show) => [show.at.0, show.at.1, 0.0, 0.0],
+            Menu::Open { caret: Some(rect), .. } => return *rect,
+            Menu::Open { show: Show { element: Some(rect), .. }, .. } => *rect,
+            Menu::Open { show, .. } => [show.at.0, show.at.1, 0.0, 0.0],
             Menu::Closed | Menu::Leaving(_) => [0.0; 4],
         };
         CGRect::new(CGPoint::new(x as CGFloat, y as CGFloat), CGSize::new(w as CGFloat, h as CGFloat))
+    }
+
+    /// After a frame: a field's menu that is up moves with the caret.
+    pub(super) fn menu_follow_caret(&self) {
+        let moved = match &mut *self.ivars().menu.borrow_mut() {
+            Menu::Open { caret: Some(at), .. } => match self.caret().filter(|now| now != at) {
+                Some(now) => { *at = now; true }
+                None => false,
+            },
+            _ => false,
+        };
+        let interaction = self.ivars().edit_menu.borrow().clone();
+        if let (true, Some(interaction)) = (moved, interaction) {
+            // SAFETY: the interaction asks the view for the menu's target rect again.
+            let _: () = unsafe { msg_send![&*interaction, updateVisibleMenuPositionAnimated: true] };
+        }
+    }
+
+    /// The focused field's caret, where the keyboard's text input has it.
+    fn caret(&self) -> Option<CGRect> {
+        self.ivars().text.borrow().as_ref().map(|input| input.last_caret()).filter(|rect| rect.size.height > 0.0)
     }
 
     /// An item was picked: `command` is its `UICommand`, whose property list is the item's id.
@@ -113,7 +142,7 @@ impl RuneView {
     /// hears the menu was dismissed.
     pub(super) fn menu_dismissed(&self) {
         let ivars = self.ivars();
-        if !matches!(&*ivars.menu.borrow(), Menu::Open(_)) { return; }
+        if !matches!(&*ivars.menu.borrow(), Menu::Open { .. }) { return; }
         let mut seq = ivars.menu_seq.get();
         let attempt = seq.next();
         ivars.menu_seq.set(seq);

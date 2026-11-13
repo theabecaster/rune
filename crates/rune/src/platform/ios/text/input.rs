@@ -469,6 +469,11 @@ impl RuneTextInput {
         }
     }
 
+    /// The caret's rect in the host view's points, as of the last frame.
+    pub(crate) fn last_caret(&self) -> CGRect {
+        self.ivars().caret.get()
+    }
+
     /// The keyboard's side of the conversation, while it lives.
     fn delegate(&self) -> Option<Retained<AnyObject>> {
         self.ivars().delegate.borrow().as_ref().and_then(Weak::load)

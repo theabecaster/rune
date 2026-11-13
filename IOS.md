@@ -21,6 +21,8 @@ What works:
 - **Hardware keyboard.** Arrows, Return, Escape, Tab and the function keys with their
   modifiers, key repeat, and shortcuts with ⌘ as on a Mac. Every key is also a physical key,
   for `El::on_physical_input`.
+- **App menus.** `App::menu_item` items join an iPad's menu bar and its ⌘ list; on an iPhone
+  their shortcuts run them when no handler takes the key.
 - **Clipboard and menus.** Copy, cut and paste use the system pasteboard. A menu from
   `Tx::popup_menu` (a field's Cut, Copy and Paste among them) shows as the system's edit menu.
 - **Accessibility.** VoiceOver, Switch Control and Voice Control read the same accessibility

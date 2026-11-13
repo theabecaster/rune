@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_foundation_video::NSString;
 use objc2_video::rc::{Retained, Weak};
 use objc2_video::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol};
 use objc2_video::{DefinedClass, Encode, Encoding, MainThreadMarker, MainThreadOnly, class, define_class, extern_class, extern_protocol, msg_send, sel};
@@ -309,6 +310,15 @@ define_class!(
         #[unsafe(method(runeLongPress:))]
         fn long_press(&self, recognizer: &AnyObject) {
             self.long_pressed(recognizer);
+        }
+
+        /// An item of the app's own menus (`App::menu_item`), picked from the menu bar or by
+        /// its shortcut: the command carries the item's id.
+        #[unsafe(method(runeMenuItem:))]
+        fn menu_item(&self, command: &AnyObject) {
+            // SAFETY: the commands `native_menu` makes carry an `NSString`.
+            let id: Option<Retained<NSString>> = unsafe { msg_send![command, propertyList] };
+            if let Some(id) = id && crate::native_menu::perform_ios_item(&id.to_string()) { self.pace(Event::Wake); }
         }
 
         #[unsafe(method(runeMenuPick:))]

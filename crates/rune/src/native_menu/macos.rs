@@ -1,13 +1,12 @@
 //! Main-thread AppKit adapter. Adds one optional selector to winit's existing delegate;
 //! never replaces the delegate or any existing method. The hook returns nil after teardown.
-use super::{Description, Location, MenuError};
+use super::{Description, Location, MenuError, Sink};
 use std::{cell::{Cell, RefCell}, ffi::{c_char, c_void}, sync::Arc};
 use objc2::{ClassType, DeclaredClass, declare_class, msg_send, msg_send_id, mutability, sel, rc::Retained,
     runtime::{AnyClass, AnyObject, Bool, Sel}};
 use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
 use objc2_foundation::{MainThreadMarker, NSObject, NSString};
 
-type Sink = Arc<dyn Fn(&str) + Send + Sync>;
 struct Action { id: String, enabled: bool, keys_first: bool, sink: Sink }
 declare_class!(
     struct MenuTarget;

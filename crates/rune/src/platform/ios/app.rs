@@ -55,6 +55,12 @@ define_class!(
     unsafe impl ApplicationDelegate for AppDelegate {}
 
     impl AppDelegate {
+        /// The main menu (the iPad's menu bar): the system's menus with the app's items.
+        #[unsafe(method(buildMenuWithBuilder:))]
+        fn build_menu(&self, builder: &AnyObject) {
+            crate::native_menu::build_ios_menus(builder);
+        }
+
         #[unsafe(method_id(application:configurationForConnectingSceneSession:options:))]
         fn configuration(&self, _application: &AnyObject, session: &AnyObject, _options: &AnyObject) -> Retained<AnyObject> {
             // SAFETY: a session's role is an `NSString`, and `UISceneConfiguration`'s

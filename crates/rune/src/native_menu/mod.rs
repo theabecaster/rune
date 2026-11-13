@@ -1,6 +1,7 @@
 //! Native application and Dock menus. One App owns the process-wide custom menu at a time:
 //! the one whose window last took focus, so with a window per App (`run_windows`) the menu bar
 //! holds the key window's items and they act in it. Default AppKit/winit items are preserved.
+//! On iOS the items go in UIKit's main menu (`ios`): the iPad's menu bar and the ⌘ list.
 //! Other native platforms return Unsupported; headless scripts use the same item lookup and
 //! action dispatch on every platform.
 use std::sync::{Arc, Mutex, Weak};
@@ -11,6 +12,12 @@ use crate::{App, AppHandle, Shortcut, Tx, app::Shared};
 mod macos;
 #[cfg(target_os = "macos")]
 mod default_macos;
+#[cfg(any(test, target_os = "ios"))]
+mod groups;
+#[cfg(target_os = "ios")]
+mod ios;
+#[cfg(target_os = "ios")]
+pub(crate) use ios::{build as build_ios_menus, keys_first, perform as perform_ios_item};
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod key_equivalent;
 #[cfg(test)]
@@ -28,6 +35,10 @@ pub(crate) use key_equivalent::set_key_equivalent;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Location { App, Named(String), Dock }
+
+/// Where an adapter sends the id of the item the user picked.
+#[cfg_attr(not(any(target_os = "macos", target_os = "ios")), allow(dead_code))]
+type Sink = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Clone)]
 struct Description {
@@ -167,7 +178,7 @@ impl<S: 'static> AppHandle<S> {
     pub fn set_menu(&self, items: impl IntoIterator<Item = MenuItem<S>>) -> Result<(), MenuError> {
         let items: Vec<_> = items.into_iter().collect();
         let mut state = self.shared.menus.0.lock().unwrap();
-        if !cfg!(target_os = "macos") && !state.presence.headless() { return Err(MenuError::Unsupported); }
+        if !cfg!(any(target_os = "macos", target_os = "ios")) && !state.presence.headless() { return Err(MenuError::Unsupported); }
         if !state.presence.running() { return Err(MenuError::NotRunning); }
         validate(&items)?;
         state.items = items; state.revision.next();
@@ -335,7 +346,18 @@ impl<S: 'static> Guard<S> {
                     result
                 })
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "ios")]
+            {
+                let weak = Arc::downgrade(&shared);
+                let sink: Sink = Arc::new(move |id: &str| {
+                    if let Some(shared) = weak.upgrade()
+                        && let Err(error) = enqueue(&shared, id, Some(revision)) { eprintln!("rune: {error}"); }
+                });
+                let descriptions: Vec<_> = items.iter().map(|i| i.description.clone()).collect();
+                ios::set(&descriptions, sink);
+                Ok(())
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
             { if items.is_empty() { Ok(()) } else { Err(MenuError::Unsupported) } }
         });
         // The app's labels may have changed with its language since the menus were made.
@@ -356,6 +378,8 @@ impl<S: 'static> Drop for Guard<S> {
             let mut state = shared.menus.0.lock().unwrap();
             state.presence = Presence::Absent; state.items.clear();
         }
+        #[cfg(target_os = "ios")]
+        ios::set(&[], Arc::new(|_: &str| {}));
         // The bar waits for the next window to take focus (`claim`).
         #[cfg(target_os = "macos")]
         let _ = BAR.try_with(|bar| {

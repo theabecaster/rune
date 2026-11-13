@@ -85,3 +85,18 @@ fn dvorak_moves_keycaps_but_not_menu_equivalents() {
     }
     crate::shortcuts::force_layout(None);
 }
+
+fn uikit(accelerator: &str) -> Option<(String, usize)> { uikit_input(&accelerator.parse().unwrap()) }
+
+#[test]
+fn uikit_inputs_name_keys_that_type_nothing_with_uikits_strings_and_the_rest_by_character() {
+    assert_eq!(uikit("cmd+b"), Some(eq("b", COMMAND)));
+    assert_eq!(uikit("cmd+shift+z"), Some(eq("z", SHIFT | COMMAND)));
+    assert_eq!(uikit("cmd+up"), Some(eq("UIKeyInputUpArrow", COMMAND)));
+    assert_eq!(uikit("ctrl+escape"), Some(eq("UIKeyInputEscape", CONTROL)));
+    assert_eq!(uikit("cmd+enter"), Some(eq("\r", COMMAND)));
+    assert_eq!(uikit("alt+backspace"), Some(eq("\u{8}", OPTION)));
+    assert_eq!(uikit("cmd+f5"), Some(eq("UIKeyInputF5", COMMAND)));
+    assert_eq!(uikit("cmd+pagedown"), Some(eq("UIKeyInputPageDown", COMMAND)));
+    assert_eq!(uikit("cmd+f13"), None, "UIKit has no name for F13 and up");
+}

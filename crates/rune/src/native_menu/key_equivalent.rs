@@ -43,6 +43,26 @@ impl KeyEquivalent {
     }
 }
 
+/// `shortcut` as a `UIKeyCommand`'s input and modifier flags. UIKit names the keys that type
+/// no character with its own strings (`UIKeyInputUpArrow`); a letter, digit or symbol is the
+/// same character AppKit's equivalent is. `UIKeyModifierFlags` has AppKit's bits. A key UIKit
+/// has no name for (Insert, F13 and up) gives none.
+#[cfg_attr(not(any(test, target_os = "ios")), allow(dead_code))]
+pub(crate) fn uikit_input(shortcut: &Shortcut) -> Option<(String, usize)> {
+    use PhysicalKeyCode::*;
+    let equivalent = KeyEquivalent::new(shortcut);
+    let named = match shortcut.physical_key() {
+        Escape => "UIKeyInputEscape", Enter => "\r", Tab => "\t", Backspace => "\u{8}", Space => " ",
+        ArrowUp => "UIKeyInputUpArrow", ArrowDown => "UIKeyInputDownArrow", ArrowLeft => "UIKeyInputLeftArrow", ArrowRight => "UIKeyInputRightArrow",
+        Delete => "UIKeyInputDelete", Home => "UIKeyInputHome", End => "UIKeyInputEnd", PageUp => "UIKeyInputPageUp", PageDown => "UIKeyInputPageDown",
+        key if (F1..=F12).contains(&key) => return Some((format!("UIKeyInputF{}", key as u32 - F1 as u32 + 1), equivalent.mask)),
+        Insert => return None,
+        key if (F13..=F24).contains(&key) => return None,
+        _ => return Some((equivalent.key, equivalent.mask)),
+    };
+    Some((named.to_owned(), equivalent.mask))
+}
+
 /// Shows `shortcut` beside the item, or nothing.
 #[cfg(target_os = "macos")]
 pub(crate) fn set_key_equivalent(item: &objc2_app_kit::NSMenuItem, shortcut: Option<&Shortcut>) {

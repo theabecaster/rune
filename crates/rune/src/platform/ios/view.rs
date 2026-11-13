@@ -385,6 +385,7 @@ define_class!(
 
         #[unsafe(method(runeForeground:))]
         fn foreground(&self, _notification: &AnyObject) {
+            self.with_surface(|surface| surface.set_visible(true));
             self.pace(Event::Foreground);
         }
 
@@ -392,6 +393,7 @@ define_class!(
         fn background(&self, _notification: &AnyObject) {
             // The system sends no key-up to an app it puts away.
             self.keys(keys::Event::Reset);
+            self.with_surface(|surface| surface.set_visible(false));
             self.pace(Event::Background);
         }
 

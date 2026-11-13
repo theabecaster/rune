@@ -15,6 +15,7 @@ use crate::app::OnWindow;
 use crate::file_dialog::{FileDialogError, FileDialogKind, FileDialogOptions};
 use crate::popup_menu::Show;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use crate::edit::ImeText;
 use crate::PhysicalInput;
 use super::keys::Stroke;
@@ -77,6 +78,8 @@ pub(crate) trait Surface {
     /// The accessibility tree's changes since the last frame, while a client listens, and the
     /// view's zoom: the tree is in the app's points, which the zoom scales to the view's.
     fn accessibility(&mut self) -> Option<(TreeUpdate, f32)>;
+    /// Whether the app is in front, for `AppHandle::is_visible`.
+    fn set_visible(&mut self, visible: bool);
     /// The system's appearance.
     fn set_dark(&mut self, dark: bool);
     /// The Reduce Motion setting.
@@ -89,8 +92,8 @@ pub(crate) trait Surface {
 
 struct Hosted<S: 'static> {
     host: LayerHost<S>,
-    /// What the app's handles reach it through, kept for as long as the app draws.
-    _shared: Arc<Shared<S>>,
+    /// What the app's handles reach it through: `AppHandle::update` and `wake` from any thread.
+    shared: Arc<Shared<S>>,
     accessibility: AccessibilityLink,
     /// The app's name, which names the accessibility tree's root.
     title: &'static str,
@@ -127,6 +130,9 @@ impl<S: 'static> Surface for Hosted<S> {
 
     fn frame(&mut self, target: Instant) -> EmbedFrame {
         self.accessibility.receive(self.host.runtime_mut(), self.title);
+        // What the app's handles asked since the last frame. A view is not a window: requests
+        // to show, move or quit one have nothing to act on, and only the updates run.
+        for update in self.shared.take().updates { self.host.runtime_mut().update_if(update); }
         let frame = self.host.frame_at(target);
         // There is no window to hand over: the handle is one no window answers, as on the web.
         if frame.drew && let Some(mut ready) = self.on_ready.take() { ready(&crate::WindowHandle::new("main")); }
@@ -294,6 +300,8 @@ impl<S: 'static> Surface for Hosted<S> {
         self.host.runtime().focused_field_lines().map(|lines| Geometry::new(&lines))
     }
 
+    fn set_visible(&mut self, visible: bool) { self.shared.visible.store(visible, Ordering::Release); }
+
     fn set_dark(&mut self, dark: bool) { self.host.runtime_mut().set_system_dark(dark); }
 
     fn set_reduced_motion(&mut self, reduced: bool) { self.host.runtime_mut().set_system_reduced_motion(reduced); }
@@ -326,6 +334,9 @@ pub(crate) fn mount<S: 'static>(mut app: App<S>) -> Mount {
         let mut host = host.with_system_clipboard(wake.clone()).with_popup_menus().with_file_dialogs();
         // The view is the app's whole host here: links open in the system, as from a window.
         host.runtime_mut().open_urls_natively = true;
-        Ok(Box::new(Hosted { host, _shared: shared, accessibility: AccessibilityLink::with_wake(wake.clone()), wake, title: spec.title, on_ready, selected: None, tap: Tap::None, field_menu: None, reopen: None }))
+        // The handles' requests wake the view, as they wake a window's event loop.
+        shared.connect(wake.clone());
+        shared.visible.store(true, Ordering::Release);
+        Ok(Box::new(Hosted { host, shared, accessibility: AccessibilityLink::with_wake(wake.clone()), wake, title: spec.title, on_ready, selected: None, tap: Tap::None, field_menu: None, reopen: None }))
     })
 }

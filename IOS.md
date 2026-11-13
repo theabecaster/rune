@@ -27,6 +27,8 @@ What works:
   tree the desktop platforms do. The Reduce Motion setting is followed, and
   `Cx::system_text_scale` is the Dynamic Type size: `cx.zoom(cx.system_text_scale())` scales
   a view with it.
+- **Handles.** `AppHandle::update` and `wake` from a background thread reach the app, as from
+  a window; `is_visible` follows the app going to the background.
 - **Links and files.** `Tx::open_url` opens a link in the app that owns its scheme.
   `Tx::open_file` shows the system's document picker and answers with a copy of the file;
   `Tx::open_folder` answers with a folder the app may use until it quits, and `Tx::save_file`

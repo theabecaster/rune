@@ -1,4 +1,5 @@
-//! Work for the main thread from anywhere: the main dispatch queue, which the event loop drains.
+//! Work for the main thread from anywhere: the main dispatch queue, which a window's event
+//! loop drains on macOS and UIKit's run loop on iOS.
 
 use std::ffi::c_void;
 
@@ -26,7 +27,8 @@ extern "C" fn run(context: *mut c_void) {
     job();
 }
 
-/// Run `f` on the main queue, which the window event loop drains.
+/// Run `f` on the main queue: a view's wake from another thread on iOS, an icon or a video's
+/// turn on macOS.
 #[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn on_main(f: impl FnOnce() + Send + 'static) {
     // SAFETY: the main queue outlives the process; `run` frees the context.

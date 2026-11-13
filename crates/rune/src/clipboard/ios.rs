@@ -3,8 +3,8 @@
 //! sandbox. A secret stays on this device (`UIPasteboardOptionLocalOnly`), off the Universal
 //! Clipboard, and the worker clears it when its time is up as everywhere else.
 //!
-//! `UIPasteboard` is safe to use off the main thread, so this runs on the clipboard worker as
-//! the other backends do. Watching a held secret reads only the change count. Reading what
+//! UIKit's headers do not keep `UIPasteboard` to the main thread, which this relies on to run
+//! on the clipboard worker as the other backends do. Watching a held secret reads only the change count. Reading what
 //! another app copied is what makes iOS ask the user to allow the paste, so nothing here reads
 //! content until a paste or a read was asked for.
 use objc2_foundation_video::{NSData, NSString};
@@ -21,6 +21,8 @@ const HTML: &str = "public.html";
 const RTF: &str = "public.rtf";
 const PNG: &str = "public.png";
 
+// SAFETY: UIKit's headers declare it as a `UIPasteboardOption`, an `NSString` that lives for
+// the process.
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
     static UIPasteboardOptionLocalOnly: &'static NSString;
@@ -30,13 +32,16 @@ unsafe extern "C" {
 pub(super) struct Pasteboard;
 
 fn general() -> Retained<AnyObject> {
-    // SAFETY: `+[UIPasteboard generalPasteboard]` returns the shared pasteboard, never nil.
+    // SAFETY: `+[UIPasteboard generalPasteboard]` returns the shared pasteboard, never nil. This
+    // and every other pasteboard call here runs on the clipboard worker's thread, which relies
+    // on `UIPasteboard` not being kept to the main thread: its header has no such mark.
     unsafe { msg_send![class!(UIPasteboard), generalPasteboard] }
 }
 
 /// The pasteboard's data of one type, when it has any and no more than `limit` bytes.
 fn data(pb: &AnyObject, kind: &str, limit: usize) -> Option<Vec<u8>> {
-    // SAFETY: `dataForPasteboardType:` takes a type identifier and returns `NSData` or nil.
+    // SAFETY: `dataForPasteboardType:` takes a type identifier and returns `NSData` or nil. Off
+    // the main thread, as in `general`.
     let data: Option<Retained<NSData>> = unsafe { msg_send![pb, dataForPasteboardType: &*NSString::from_str(kind)] };
     data.filter(|d| !d.is_empty() && d.len() <= limit).map(|d| d.to_vec())
 }
@@ -47,7 +52,9 @@ impl Backend for Pasteboard {
         autoreleasepool(|_| {
             // SAFETY: a mutable dictionary of type identifiers to `NSString` and `NSData`
             // values is a pasteboard item, and the options dictionary maps
-            // `UIPasteboardOptionLocalOnly` to a boolean number.
+            // `UIPasteboardOptionLocalOnly` to a boolean number. The dictionaries, the array
+            // and the number are this thread's own; the pasteboard is used off the main
+            // thread, as in `general`.
             unsafe {
                 let item: Retained<AnyObject> = msg_send![class!(NSMutableDictionary), new];
                 let set = |value: &AnyObject, kind: &str| { let _: () = msg_send![&*item, setObject: value, forKey: &*NSString::from_str(kind)]; };
@@ -69,7 +76,8 @@ impl Backend for Pasteboard {
     }
 
     fn text(&mut self) -> Option<Zeroizing<String>> {
-        // SAFETY: `string` is the pasteboard's first string, or nil.
+        // SAFETY: `string` is the pasteboard's first string, or nil. Off the main thread, as in
+        // `general`.
         let text: Option<Retained<NSString>> = autoreleasepool(|_| unsafe { msg_send![&*general(), string] });
         text.map(|text| Zeroizing::new(text.to_string()))
     }
@@ -91,13 +99,14 @@ impl Backend for Pasteboard {
     }
 
     fn revision(&self) -> Option<u64> {
-        // SAFETY: `changeCount` is an `NSInteger` that only grows.
+        // SAFETY: `changeCount` is an `NSInteger`. Off the main thread, as in `general`.
         let count: isize = unsafe { msg_send![&*general(), changeCount] };
         Some(count as u64)
     }
 
     fn clear(&mut self) -> Result<(), String> {
-        // SAFETY: an empty array of items empties the pasteboard.
+        // SAFETY: `setItems:` takes an `NSArray` of items, here none, which empties the
+        // pasteboard. Off the main thread, as in `general`.
         unsafe {
             let none: Retained<AnyObject> = msg_send![class!(NSArray), array];
             let _: () = msg_send![&*general(), setItems: &*none];

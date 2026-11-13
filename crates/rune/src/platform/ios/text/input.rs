@@ -4,8 +4,11 @@
 //! one, autocorrection, dictation and marked text all edit through it.
 //!
 //! Positions and ranges are UTF-16 offsets into that copy. Rune draws its own caret and
-//! selection, so the geometry UIKit asks for is the caret's rect for every position: enough to
-//! place the keyboard's own bubbles, and no system selection handles or loupe.
+//! selection, so UIKit gets no selection rects, and shows no selection handles or loupe. A
+//! position's caret rect, a range's first rect and the position nearest a point come from the
+//! field's lines as last drawn (`geometry`), which place the keyboard's own bubbles and move
+//! the space bar's cursor. While the keyboard composes or the field is a password, the copy
+//! is not the field's text, and every position has the caret's rect.
 
 use std::cell::{Cell, RefCell};
 
@@ -20,12 +23,15 @@ use super::geometry::Geometry;
 use super::super::view::{RuneView, UIResponder, UIView};
 
 extern_class!(
+    // SAFETY: UIKit's class of this name is an `NSObject` subclass. UIKit keeps it to the main
+    // thread, where `RuneTextInput`'s methods, its only users here, run.
     #[unsafe(super(NSObject))]
     #[name = "UITextPosition"]
     struct UITextPosition;
 );
 
 extern_class!(
+    // SAFETY: as for `UITextPosition`.
     #[unsafe(super(NSObject))]
     #[name = "UITextRange"]
     struct UITextRange;
@@ -125,6 +131,7 @@ define_class!(
     #[ivars = Ivars]
     pub(crate) struct RuneTextInput;
 
+    // SAFETY: the superclass chain ends in `NSObject`, which implements the protocol.
     unsafe impl NSObjectProtocol for RuneTextInput {}
 
     // SAFETY: the protocol's required methods are the ones below.
@@ -169,14 +176,16 @@ define_class!(
         #[unsafe(method(paste:))]
         fn paste(&self, _sender: Option<&AnyObject>) { self.command('v'); }
 
-        /// A hardware key: the host's when it names an edit, a move or a shortcut, and UIKit's
-        /// when it types a character or the keyboard is composing.
+        /// A hardware key going down. The host hears it as a physical key, and takes it from
+        /// UIKit when it names an edit, a move or a shortcut. UIKit types the key when it is a
+        /// character, and has it to itself while the keyboard is composing.
         #[unsafe(method(pressesBegan:withEvent:))]
         fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
             let composing = self.ivars().doc.borrow().marked().is_some();
             let taken = !composing && self.ivars().host.load().is_some_and(|host| host.presses(presses, true, true));
             if !taken {
-                // SAFETY: UIKit's own handling, which types the key into this text input.
+                // SAFETY: `presses` and `event` are UIKit's own objects, passed unchanged to
+                // `UIView`'s method of the same signature.
                 let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
             }
         }

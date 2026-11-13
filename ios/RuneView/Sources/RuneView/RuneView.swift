@@ -13,6 +13,8 @@ import UIKit
 public struct RuneView: UIViewRepresentable {
     private let make: () -> UnsafeMutableRawPointer?
 
+    /// A view of what `make` returns. `make` runs once, on the main thread, when SwiftUI makes
+    /// the view; if it returns null the space stays empty.
     public init(_ make: @escaping () -> UnsafeMutableRawPointer?) {
         self.make = make
     }

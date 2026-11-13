@@ -235,7 +235,8 @@ impl<S> Cx<S> {
     }
     /// What the screen keeps from the app at each edge, in points, in top/right/bottom/left
     /// order: an iPhone's status bar, home indicator and rounded corners, a browser's notch.
-    /// Zero on the desktop. Apply these inside a full-canvas root so backgrounds can extend to
+    /// On iOS the soft keyboard counts as the bottom inset while it shows, so content padded
+    /// by it stays above the keyboard. Zero on the desktop. Apply these inside a full-canvas root so backgrounds can extend to
     /// the screen edges. A `memo` closure that reads it needs nothing in its version.
     pub fn safe_area(&self) -> [f32; 4] {
         self.safe_area

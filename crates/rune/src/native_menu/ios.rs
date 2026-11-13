@@ -25,6 +25,8 @@ use super::key_equivalent::uikit_input;
 use super::{Description, Sink};
 use crate::runtime::Unhandled;
 
+// SAFETY: UIKit's headers declare each as a `UIMenuIdentifier`, an `NSString` that lives for
+// the process.
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
     static UIMenuAbout: &'static NSString;
@@ -51,7 +53,9 @@ thread_local! {
 pub(super) fn set(items: &[Description], sink: Sink) {
     let next = (!items.is_empty()).then(|| Installed { items: items.to_vec(), sink });
     INSTALLED.with(|installed| *installed.borrow_mut() = next);
-    // SAFETY: the main menu system is UIKit's; asking it to rebuild calls the app's builder.
+    // SAFETY: `+[UIMenuSystem mainSystem]` is never nil, and `setNeedsRebuild` takes nothing.
+    // The caller is an app's menu guard, on the main thread. UIKit then calls the app
+    // delegate's `buildMenuWithBuilder:`.
     unsafe {
         let system: Retained<AnyObject> = msg_send![class!(UIMenuSystem), mainSystem];
         let _: () = msg_send![&*system, setNeedsRebuild];
@@ -161,7 +165,9 @@ fn command(d: &Description) -> Retained<AnyObject> {
 }
 
 fn menu(title: &str, options: usize, id: Option<&NSString>, children: Vec<Retained<AnyObject>>) -> Retained<AnyObject> {
-    // SAFETY: an array of menu elements, and a menu made of them.
+    // SAFETY: `addObject:` takes an object, which each element is. The menu's initializer takes
+    // an `NSString`, a `UIImage` or nil, an identifier or nil, a `UIMenuOptions` (an
+    // `NSUInteger`) and an `NSArray` of menu elements.
     unsafe {
         let list: Retained<AnyObject> = msg_send![class!(NSMutableArray), array];
         for child in &children { let _: () = msg_send![&*list, addObject: &**child]; }

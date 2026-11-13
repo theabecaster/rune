@@ -30,6 +30,8 @@ pub(super) struct Picking {
     file_name: String,
 }
 
+// SAFETY: the block declares nothing. Linking the framework brings in `UTType`, the class
+// `pick_file` looks up by name.
 #[link(name = "UniformTypeIdentifiers", kind = "framework")]
 unsafe extern "C" {}
 

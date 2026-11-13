@@ -51,6 +51,7 @@ extern_protocol!(
 );
 
 extern_class!(
+    // SAFETY: UIKit's class of this name is an `NSObject` subclass for the main thread only.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "UIResponder"]
@@ -58,6 +59,7 @@ extern_class!(
 );
 
 extern_class!(
+    // SAFETY: UIKit's class of this name is a `UIResponder` subclass for the main thread only.
     #[unsafe(super(UIResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "UIView"]
@@ -106,6 +108,7 @@ define_class!(
     #[ivars = Ivars]
     pub(crate) struct RuneView;
 
+    // SAFETY: the superclass chain ends in `NSObject`, which implements the protocol.
     unsafe impl NSObjectProtocol for RuneView {}
 
     // SAFETY: every method of the protocol is optional.
@@ -299,7 +302,8 @@ define_class!(
         #[unsafe(method(pressesBegan:withEvent:))]
         fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
             if !self.presses(presses, true, false) {
-                // SAFETY: the responder chain's own handling of presses this view leaves alone.
+                // SAFETY: `presses` and `event` are UIKit's own objects, passed unchanged to
+                // `UIView`'s method of the same signature.
                 let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
             }
         }

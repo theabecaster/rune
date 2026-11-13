@@ -36,7 +36,7 @@ pub(crate) struct Element {
     pub(crate) value: Option<String>,
     pub(crate) hint: Option<String>,
     pub(crate) traits: u16,
-    /// Left, top, width and height in the view's points.
+    /// Left, top, width and height in the app's points, which the view's zoom scales to its own.
     pub(crate) rect: [f32; 4],
     /// The nearest scroll view around it, for a reader's scroll gesture.
     scrolls: Option<u64>,
@@ -173,7 +173,7 @@ fn within(b: [f64; 4], clip: [f64; 4]) -> [f64; 4] {
 }
 
 /// The element `n` is, or none for a container and for text with nothing to say. `shown` is
-/// the part of it in view: left, top, right, bottom in the view's points.
+/// the part of it in view: left, top, right, bottom in the app's points.
 fn element(id: u64, n: &Node, name: Option<String>, shown: [f64; 4], scrolls: Option<u64>) -> Option<Element> {
     use traits::*;
     let role = n.role();

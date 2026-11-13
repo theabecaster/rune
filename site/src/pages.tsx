@@ -197,10 +197,11 @@ const buildable: { title: string; text: ReactNode; status: Status; meta: string;
     title: "iOS, then Android",
     text: (
       <>
-        An iOS shell with native text input and a view for embedding Rune in SwiftUI. Nothing runs on a phone yet.
+        The same apps on an iPhone or iPad, with native text input, and a view for embedding Rune in SwiftUI.
+        Experimental; Android isn't started.
       </>
     ),
-    status: "planned",
+    status: "partly",
     meta: "M6",
     href: "/roadmap#m6",
   },
@@ -315,7 +316,7 @@ export function HomeView() {
         <SectionHead id="build" title="What you can build" aside="October 2026">
           <p>
             Native apps first, and anything that needs Rune's pixels without a window, since headless runs use the same
-            code. The web build is experimental, and phones are planned.
+            code. The web and iOS builds are experimental, and Android is planned.
           </p>
         </SectionHead>
         <ul className="index-list">

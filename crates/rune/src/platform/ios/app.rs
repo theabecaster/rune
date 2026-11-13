@@ -1,6 +1,6 @@
 //! An app that owns the screen: `UIApplicationMain`, one window scene, and a `RuneView` that
 //! fills its window. The scene's configuration is made in code, so an app's `Info.plist` needs
-//! only an empty `UIApplicationSceneManifest`.
+//! a `UIApplicationSceneManifest` but no scene configuration in it and no storyboard.
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int};
@@ -14,11 +14,13 @@ use super::surface::{self, Mount};
 use super::view::{RuneView, UIResponder};
 use crate::app::App;
 
+// SAFETY: the function has this C signature in UIKit's headers.
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
     fn UIApplicationMain(argc: c_int, argv: *mut *mut c_char, principal: Option<&NSString>, delegate: Option<&NSString>) -> c_int;
 }
 
+// SAFETY: the functions have these C signatures in `crt_externs.h`.
 unsafe extern "C" {
     fn _NSGetArgc() -> *mut c_int;
     fn _NSGetArgv() -> *mut *mut *mut c_char;
@@ -49,6 +51,7 @@ define_class!(
     #[name = "RuneAppDelegate"]
     struct AppDelegate;
 
+    // SAFETY: the superclass chain ends in `NSObject`, which implements the protocol.
     unsafe impl NSObjectProtocol for AppDelegate {}
 
     // SAFETY: every method of the protocol is optional.
@@ -89,6 +92,7 @@ define_class!(
     #[ivars = SceneIvars]
     struct SceneDelegate;
 
+    // SAFETY: the superclass chain ends in `NSObject`, which implements the protocol.
     unsafe impl NSObjectProtocol for SceneDelegate {}
 
     // SAFETY: every method of the protocol is optional.

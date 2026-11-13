@@ -290,7 +290,7 @@ Rune's core crate: views, layout, animation, rendering, text and the native shel
   key with no physical origin: `Runtime::key`, or a script `"key"` without a `"code"`.
   `tx.key_base()` is the character the key types under the current layout with no modifiers
   (`Some('a')` for ⌥A, which types `å`), for bindings by letter that follow the layout, as
-  macOS's key bindings do; `None` where winit can't say (the web, iOS) and with no physical
+  macOS's key bindings do; `None` where winit can't say (the web) and with no physical
   origin.
 
   `Mods::cmd` is the primary shortcut modifier, reported with its key: ⌘ on macOS (with
@@ -669,7 +669,7 @@ app.run();
 
   Launch Services learns the scheme when the bundle is opened or registered (`lsregister -f
   MyApp.app`); then `open 'myapp://x'` launches or reaches the app. A bare `cargo run` binary has
-  no bundle and gets no links. iOS isn't wired yet (winit owns the scene delegate), and Linux
+  no bundle and gets no links. iOS isn't wired yet (the scene delegate Rune makes takes no links), and Linux
   passes a link to a new process as a launch argument, so the hook never runs there.
 - Links and relaunches on Windows: Windows starts a new process for each launch, passing a link
   as an argument. The hook receives the links among the first process's arguments
@@ -1233,6 +1233,13 @@ setting when available. The preference lives on Runtime/Cx, so existing
 false; tests can call `rt.set_system_reduced_motion(value)` and inspect
 `rt.system_reduced_motion()`.
 
+`cx.system_text_scale()` is how much larger or smaller than its default the system's text
+size setting is: iOS's Dynamic Type, and 1 on platforms that report none.
+`cx.zoom(cx.system_text_scale())` scales a whole view by it. `cx.safe_area()` is what the
+screen keeps from the app at each edge, in points, in top/right/bottom/left order: an
+iPhone's status bar and home indicator, the soft keyboard at the bottom while it shows, a
+browser's notch. It is zero on the desktop; pad a full-canvas root by it.
+
 A root `.on_window_focus(|state: &mut State, focused, tx| ...)` receives native
 activation/deactivation in order. It applies to regular windows and interactive
 overlays, independently of text-field focus. Headless tests inject the same events
@@ -1756,7 +1763,9 @@ row().key("theme").child(text(theme_title(&s.theme)))
   itself to its items; `.symbol` doesn't show. Menus are dark or light as the window's content
   is (Windows 10 1903 and later), whatever the system's appearance. Keyboard navigation and
   dismissal by a click outside (answered `None`) are the system's, overlays included. A click
-  right after the menu closes lands where the pointer is, moved or not. Elsewhere
+  right after the menu closes lands where the pointer is, moved or not. iOS shows the menu as
+  the system's edit menu (the bar above a selection), with separators as groups, checked and
+  disabled items and submenus. Elsewhere
   `popup_menu_supported()` is false and `on_pick` gets `None` on the next frame, so keep an
   in-app fallback for those platforms. `cargo run -p rune --example popup_menu` shows both kinds.
 - **Headless**: `--tree` has a `popupMenu` object (items, anchor, `selected`, `queued`) while a

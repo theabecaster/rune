@@ -107,7 +107,9 @@ impl RuneView {
                 Effect::Move => {
                     let interaction = self.ivars().edit_menu.borrow().clone();
                     if let Some(interaction) = interaction {
-                        // SAFETY: the interaction asks the view for the menu's target rect again.
+                        // SAFETY: the interaction is the `UIEditMenuInteraction` `present_menu`
+                        // made, and the method takes a `BOOL`. The interaction then asks the
+                        // view for the menu's target rect again.
                         let _: () = unsafe { msg_send![&*interaction, updateVisibleMenuPositionAnimated: true] };
                     }
                 }
@@ -177,7 +179,9 @@ fn element(entry: &Entry) -> Retained<AnyObject> {
 }
 
 fn ui_menu(title: &str, options: usize, children: Vec<Retained<AnyObject>>) -> Retained<AnyObject> {
-    // SAFETY: an array of menu elements, and a menu made of them.
+    // SAFETY: `addObject:` takes an object, which each element is. The menu's initializer takes
+    // an `NSString`, a `UIImage` or nil, an identifier or nil, a `UIMenuOptions` (an
+    // `NSUInteger`) and an `NSArray` of menu elements.
     unsafe {
         let list: Retained<AnyObject> = msg_send![class!(NSMutableArray), array];
         for child in &children { let _: () = msg_send![&*list, addObject: &**child]; }

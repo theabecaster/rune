@@ -86,7 +86,7 @@ def assemble(out, module, header, libraries, links):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="ios-lib", description=__doc__)
     parser.add_argument("--package", required=True, help="the workspace package whose library exports the views")
     parser.add_argument("--module", required=True, help="the module's name in Swift (import MODULE)")
     parser.add_argument("--header", required=True, type=Path, help="a C header declaring the exported functions")

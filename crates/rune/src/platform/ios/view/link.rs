@@ -19,12 +19,16 @@ use crate::platform::main_queue::on_main;
 use crate::runtime::Waker;
 use crate::time::Instant;
 
+// SAFETY: the function has this C signature in QuartzCore's headers: it takes nothing and
+// returns a `CFTimeInterval`, a `double`.
 #[link(name = "QuartzCore", kind = "framework")]
 unsafe extern "C" {
     /// Seconds on the clock a display link's timestamps are on.
     fn CACurrentMediaTime() -> f64;
 }
 
+// SAFETY: Foundation's headers declare it as an `NSRunLoopMode`, an `NSString` that lives for
+// the process.
 #[link(name = "Foundation", kind = "framework")]
 unsafe extern "C" {
     static NSRunLoopCommonModes: &'static AnyObject;
@@ -108,7 +112,8 @@ impl RuneView {
     /// Ends the display link, if there is one.
     pub(super) fn destroy_link(&self) {
         if let Some(link) = self.ivars().link.borrow_mut().take() {
-            // SAFETY: `invalidate` takes the link off its run loop and releases the view.
+            // SAFETY: the link is the one `create_link` made, invalidated on the main thread,
+            // whose run loop it was added to. It then lets go of the view.
             let _: () = unsafe { msg_send![&*link, invalidate] };
         }
     }

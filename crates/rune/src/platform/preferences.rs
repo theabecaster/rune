@@ -71,6 +71,7 @@ unsafe fn gnome_animations() -> Option<bool> {
 
 #[cfg(target_os = "ios")]
 pub(crate) fn reduced_motion() -> bool {
+    // SAFETY: the function has this C signature in UIKit's headers.
     #[link(name = "UIKit", kind = "framework")]
     unsafe extern "C" {
         fn UIAccessibilityIsReduceMotionEnabled() -> bool;
@@ -90,7 +91,8 @@ pub(crate) fn text_scale() -> f32 {
     use objc2_video::rc::Retained;
     use objc2_video::runtime::AnyObject;
     use objc2_video::{class, msg_send};
-    // SAFETY: the default font metrics scale a value in points for the current size category.
+    // SAFETY: `+[UIFontMetrics defaultMetrics]` is never nil, and `scaledValueForValue:` takes
+    // and returns a `CGFloat`.
     let scaled: CGFloat = unsafe {
         let metrics: Retained<AnyObject> = msg_send![class!(UIFontMetrics), defaultMetrics];
         msg_send![&*metrics, scaledValueForValue: 100.0 as CGFloat]

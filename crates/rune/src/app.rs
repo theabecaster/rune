@@ -391,8 +391,9 @@ impl<S: 'static> App<S> {
     /// without a rebuild. It applies to every GPU the process makes from here on, and a
     /// `prewarm_gpu` already running on the other backend starts over on this one; an app that
     /// opts out calls `rune::prewarm_gpu_on(GpuBackend::Wgpu)` first in `main` instead of
-    /// `prewarm_gpu()` to avoid the restart. An iOS app, which embeds a `LayerHost` instead,
-    /// calls `rune::prewarm_gpu_on`. Does nothing elsewhere.
+    /// `prewarm_gpu()` to avoid the restart. On iOS it chooses too, as
+    /// `rune::prewarm_gpu_on` does; an iOS app that calls neither draws with wgpu's backend.
+    /// Does nothing elsewhere.
     pub fn gpu_backend(self, backend: crate::GpuBackend) -> Self {
         crate::gpu::backend::choose(backend);
         self

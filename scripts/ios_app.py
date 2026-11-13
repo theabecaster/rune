@@ -91,7 +91,7 @@ def install_device(stage, args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="ios-app", description=__doc__)
     for name in ("name", "id", "bin"):
         parser.add_argument(f"--{name}", required=True)
     parser.add_argument("--exe", help="the executable's name in the bundle (default: the binary's)")

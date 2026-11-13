@@ -21,6 +21,8 @@ use super::view::RuneView;
 use crate::a11y::ios::{Element, Gesture, Mirror, Toward, traits};
 use crate::runtime::HashMap;
 
+// SAFETY: the declarations match UIKit's headers: a `UIAccessibilityTraits` is a `uint64_t`, a
+// `UIAccessibilityNotifications` a `uint32_t`, and the functions have these C signatures.
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
     static UIAccessibilityTraitButton: u64;
@@ -84,6 +86,8 @@ fn toward(direction: isize) -> Option<Toward> {
 }
 
 extern_class!(
+    // SAFETY: UIKit's class of this name is an `NSObject`, through `UIResponder`: naming the
+    // root alone claims no method the class lacks.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "UIAccessibilityElement"]
@@ -172,7 +176,7 @@ pub(crate) struct Accessibility {
 
 impl Accessibility {
     pub(crate) fn new() -> Self {
-        // SAFETY: an empty array.
+        // SAFETY: `+[NSArray array]` takes nothing and returns a new array, never nil.
         let list = unsafe { msg_send![class!(NSArray), array] };
         Accessibility { mirror: Mirror::default(), made: HashMap::default(), list, asked: false }
     }
@@ -203,12 +207,12 @@ impl Accessibility {
         let first = self.mirror.elements().is_empty();
         let changes = self.mirror.apply(update);
         let mut made = HashMap::default();
-        // SAFETY: a mutable array that takes each element.
+        // SAFETY: `+[NSMutableArray array]` takes nothing and returns a new array, never nil.
         let list: Retained<AnyObject> = unsafe { msg_send![class!(NSMutableArray), array] };
         for element in self.mirror.elements() {
             let object = self.made.remove(&element.id).unwrap_or_else(|| RuneElement::new(mtm, host, element.id));
             object.describe(element, zoom);
-            // SAFETY: as above.
+            // SAFETY: `addObject:` takes an object that is not nil, which the element is.
             let _: () = unsafe { msg_send![&*list, addObject: &*object] };
             made.insert(element.id, object);
         }

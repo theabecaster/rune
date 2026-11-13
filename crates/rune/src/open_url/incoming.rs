@@ -18,7 +18,7 @@
 //! Windows hands a link to a new process as a launch argument: the links among the first
 //! process's arguments are kept as the launching link is on macOS, and `single_instance` sends
 //! a later launch's links here from the first process's pipe (`instance`). Links that arrive
-//! before the loop starts are kept too. iOS (winit owns the scene delegate) is a follow-up, and
+//! before the loop starts are kept too. iOS (the scene delegate Rune makes takes no links) is a follow-up, and
 //! Linux never calls the hook.
 // The web build runs no native window, so nothing here is reached there.
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]

@@ -21,8 +21,8 @@ What works:
 - **Hardware keyboard.** Arrows, Return, Escape, Tab and the function keys with their
   modifiers, key repeat, and shortcuts with ⌘ as on a Mac. Every key is also a physical key,
   for `El::on_physical_input`.
-- **App menus.** `App::menu_item` items join an iPad's menu bar and its ⌘ list; on an iPhone
-  their shortcuts run them when no handler takes the key.
+- **App menus.** In an app `rune::run` started, `App::menu_item` items join an iPad's menu bar
+  and its ⌘ list; on an iPhone their shortcuts run them when no handler takes the key.
 - **Clipboard and menus.** Copy, cut and paste use the system pasteboard. A menu from
   `Tx::popup_menu` (a field's Cut, Copy and Paste among them) shows as the system's edit menu.
 - **Accessibility.** VoiceOver, Switch Control and Voice Control read the same accessibility
@@ -30,14 +30,23 @@ What works:
   `Cx::system_text_scale` is the Dynamic Type size: `cx.zoom(cx.system_text_scale())` scales
   a view with it.
 - **Handles.** `AppHandle::update` and `wake` from a background thread reach the app, as from
-  a window; `is_visible` follows the app going to the background.
+  a window; `is_visible` follows the app going to the background. `App::on_ready` runs once
+  the first frame is on screen.
 - **Links and files.** `Tx::open_url` opens a link in the app that owns its scheme.
   `Tx::open_file` shows the system's document picker and answers with a copy of the file;
   `Tx::open_folder` answers with a folder the app may use until it quits, and `Tx::save_file`
   asks for the folder and answers with the dialog's file name inside it.
 
-What doesn't yet: the system's selection handles and loupe (a field draws its own selection).
-`App::on_ready` runs once the first frame is on screen; its handle reaches no window.
+What doesn't yet:
+
+- The system's selection handles and loupe: a field draws its own selection.
+- An App's menu items in the menu bar of a UIKit or SwiftUI app that embeds a Rune view. That
+  app's own delegate builds its main menu, so on an iPad only a `keys_first` item's shortcut
+  runs there; on an iPhone every item's does.
+- `AppHandle`'s requests to show, move or quit a window, and the handle `on_ready` is given:
+  a view is no window, so they are dropped.
+- Links into the app: `App::on_open_url` is never called.
+- Intel Macs' simulators: `scripts/ios-lib` builds for devices and Apple silicon simulators.
 
 ## Build and run in a simulator
 
@@ -56,8 +65,10 @@ simulator and boots it first; `--no-launch` and `--no-install` stop earlier; arg
 `--` go to the app. No Xcode project is involved.
 
 ```text
-usage: ios-app --name NAME --id ID --bin BIN [--exe EXE] [--out OUT] [--simulator SIMULATOR]
-               [--device DEVICE] [--profile PROFILE] [--no-install] [--no-launch] [-- ARGS...]
+usage: ios-app [-h] --name NAME --id ID --bin BIN [--exe EXE] [--out OUT]
+               [--simulator SIMULATOR] [--device DEVICE] [--profile PROFILE]
+               [--no-install] [--no-launch]
+               ...
 ```
 
 ## Run on a device
@@ -87,8 +98,9 @@ fn main() {
 }
 ```
 
-`AppSpec`'s size is ignored: the app is the size of the screen. Move desktop-only dependencies
-(native file dialogs, hot reload, the system tray) behind target conditions.
+`AppSpec`'s size is ignored: the app is the size of the screen. Move the app's own desktop-only
+crates (a file dialog crate, hot reload, the system tray) behind target conditions; Rune's
+file dialogs (`Tx::open_file`) need none.
 
 ## A Rune view in a UIKit or SwiftUI app
 
@@ -115,7 +127,8 @@ scripts/ios-lib --package my-app --module MyApp --header include/my_app.h
 ```
 
 ```text
-usage: ios-lib --package PACKAGE --module MODULE --header HEADER [--out OUT] [--debug]
+usage: ios-lib [-h] --package PACKAGE --module MODULE --header HEADER
+               [--out OUT] [--debug]
 ```
 
 It builds with `cargo rustc --crate-type staticlib`, so the package's manifest needs no
@@ -143,11 +156,16 @@ that doesn't reach the screen's edges reads zero. `examples/web-hello` exports
 
 ## What the `Info.plist` needs
 
-`scripts/ios-app` writes these. An app with its own bundle needs the same:
+`scripts/ios-app` writes these, with the bundle's name, identifier, executable and versions.
+An app with its own bundle needs the same:
 
-- `UIApplicationSceneManifest`, with no configurations: Rune supplies the scene's in code.
+- `UIApplicationSceneManifest` with `UIApplicationSupportsMultipleScenes` false and no
+  configurations: Rune supplies the scene's in code, and shows one window.
 - `UILaunchScreen` (an empty dictionary will do), or iOS letterboxes the app.
 - `CADisableMinimumFrameDurationOnPhone` set to true, or an iPhone holds the app at 60 Hz.
 - `MinimumOSVersion` 16.0 or later.
+- `UIDeviceFamily` `[1, 2]` (iPhone and iPad): without the 2 an iPad runs the app as an
+  iPhone app, in a phone-sized frame.
+- `UISupportedInterfaceOrientations` with portrait and both landscapes, for an iPhone.
 - `UISupportedInterfaceOrientations~ipad` with all four orientations, or an iPad runs the app
   full screen only, never in Split View or a Stage Manager window.

@@ -17,6 +17,8 @@ use super::super::pacing::Event;
 use super::{RuneView, Stage};
 use crate::platform::preferences::{reduced_motion, text_scale};
 
+// SAFETY: UIKit's headers declare each as an `NSNotificationName` or an `NSString`, an object
+// that lives for the process.
 #[link(name = "UIKit", kind = "framework")]
 unsafe extern "C" {
     static UIApplicationDidEnterBackgroundNotification: &'static AnyObject;
@@ -116,7 +118,7 @@ impl RuneView {
     pub(super) fn moved_to_window(&self) {
         // SAFETY: `UIView.window` is a nullable object, a window's screen is never nil and its
         // `nativeScale` is a `CGFloat`, the notification centre and the shared application are
-        // singletons, and the two selectors are methods of this class that take the
+        // singletons, and each selector is a method of this class that takes the
         // notification.
         unsafe {
             let centre: Retained<AnyObject> = msg_send![class!(NSNotificationCenter), defaultCenter];

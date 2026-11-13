@@ -173,7 +173,9 @@ impl<S: 'static> App<S> {
 impl<S: 'static> AppHandle<S> {
     /// Replace all this App's custom items, preserving native defaults. Validates and queues
     /// the new snapshot; enabled/checked changes reach AppKit on the next event-loop drain.
-    /// Native installation failures are retained by take_menu_errors(). On Windows/Linux this
+    /// Native installation failures are retained by take_menu_errors(). On iOS the items join
+    /// UIKit's main menu in an app `rune::run` started; a view embedded in another app has no
+    /// place in that app's menu, and there the shortcuts alone work. On Windows/Linux this
     /// returns Unsupported without changing anything (except inside a headless run). On macOS
     /// the menus and standard items Rune made also take the app's current labels
     /// (`rune::set_labels`), so an app calls this again after its language changes.
